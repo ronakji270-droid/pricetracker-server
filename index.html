@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Price Tracker · Skyblock Market Dashboard</title>
+  <style>
+    :root{
+      --bg:#0a0c11; --panel:#11141b; --panel2:#171b24; --hover:#1b2030; --line:#222838; --line2:#2b3246;
+      --text:#e9ecf3; --muted:#8a92a6; --faint:#5d6478;
+      --accent:#f5b942; --accent-ink:#1a1405; --green:#34d399; --red:#f87171; --blue:#60a5fa; --violet:#a78bfa;
+      --shadow:0 10px 40px rgba(0,0,0,.45); --radius:12px;
+    }
+    [data-theme="light"]{
+      --bg:#f4f5f8; --panel:#ffffff; --panel2:#f1f3f8; --hover:#eef1f7; --line:#e3e6ee; --line2:#d3d8e4;
+      --text:#151925; --muted:#69728a; --faint:#98a0b4;
+      --accent:#d99a12; --accent-ink:#ffffff; --green:#0f9d6b; --red:#d9443f; --blue:#2563eb; --violet:#7c5cd6;
+      --shadow:0 10px 40px rgba(20,30,60,.14);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{background:var(--bg);color:var(--text);font:14px/1.45 "Inter","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+    button,input,select,textarea{font:inherit;color:inherit}
+    button{cursor:pointer}
+    .ic{flex-shrink:0;vertical-align:middle}
+    .app{display:flex;height:100%}
+
+    /* ---------- sidebar ---------- */
+    .side{width:244px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:16px 12px;flex-shrink:0;z-index:30}
+    .brand{display:flex;align-items:center;gap:11px;padding:6px 8px 18px}
+    .logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#e0742c);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;letter-spacing:.5px}
+    .brand b{display:block;font-size:15px}
+    .brand small{color:var(--muted);font-size:12px}
+    .navsec{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);padding:14px 10px 6px}
+    .nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;color:var(--muted);font-weight:600;border:0;background:none;width:100%;text-align:left}
+    .nav:hover{background:var(--hover);color:var(--text)}
+    .nav.on{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+    .nav .badge{margin-left:auto;font-size:11px;background:var(--panel2);color:var(--muted);padding:1px 8px;border-radius:20px;font-weight:700}
+    .nav.on .badge{color:var(--accent)}
+    .side-foot{margin-top:auto;padding:12px 10px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+
+    /* ---------- main ---------- */
+    .main{flex:1;min-width:0;display:flex;flex-direction:column}
+    .top{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);position:sticky;top:0;z-index:20}
+    .gsearch{position:relative;flex:1;max-width:520px}
+    .gsearch svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--faint)}
+    .gsearch input{width:100%;padding:10px 12px 10px 38px;background:var(--panel);border:1px solid var(--line);border-radius:10px;outline:none}
+    .gsearch input:focus,.field:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+    .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;background:var(--panel);border:1px solid var(--line);font-size:12.5px;color:var(--muted);font-weight:600;white-space:nowrap}
+    .dot{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}
+    .dot.live{background:var(--green);box-shadow:0 0 0 0 var(--green);animation:pulse 2s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--green) 55%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+    .icon-btn{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+    .icon-btn:hover{color:var(--text);background:var(--hover)}
+    .menu{display:none}
+    #view{padding:24px;overflow-y:auto;flex:1}
+    .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+    h1{margin:0;font-size:24px;letter-spacing:-.01em}
+    h2{margin:0;font-size:15px}
+    .sub{color:var(--muted);margin:4px 0 0}
+    .banner{background:color-mix(in srgb,var(--red) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--red) 40%,var(--line));color:var(--red);padding:10px 14px;border-radius:10px;margin-bottom:16px;font-weight:600}
+
+    /* ---------- components ---------- */
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+    .card-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+    .card-h h2{display:flex;align-items:center;gap:8px}
+    .card-b{padding:16px}
+    .grid{display:grid;gap:14px}
+    .stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:16px}
+    .stat{padding:16px}
+    .stat .l{color:var(--muted);font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+    .stat .v{font-size:28px;font-weight:800;margin-top:6px;letter-spacing:-.02em}
+    .stat .s{color:var(--faint);font-size:12px;margin-top:2px}
+    .cols2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+    .seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
+    .seg button{border:0;background:none;color:var(--muted);padding:6px 14px;border-radius:7px;font-weight:600}
+    .seg button.on{background:var(--accent);color:var(--accent-ink)}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+    .chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:5px 12px;border-radius:20px;font-weight:600;font-size:12.5px}
+    .chip:hover{color:var(--text);background:var(--hover)}
+    .chip.on{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+    .chip i{font-style:normal;opacity:.7;margin-left:5px}
+    .field{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;outline:none;min-width:0}
+    textarea.field{width:100%;min-height:130px;resize:vertical}
+    .btn{border:0;background:var(--accent);color:var(--accent-ink);padding:9px 16px;border-radius:9px;font-weight:700}
+    .btn:hover{filter:brightness(1.08)}
+    .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+    .btn.ghost:hover{background:var(--hover)}
+    .btn.sm{padding:6px 12px;font-size:12.5px}
+    .btn.danger{background:color-mix(in srgb,var(--red) 16%,var(--panel2));color:var(--red);border:1px solid color-mix(in srgb,var(--red) 35%,var(--line))}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .muted{color:var(--muted)} .faint{color:var(--faint)} .num{text-align:right;font-variant-numeric:tabular-nums}
+    .up{color:var(--green)} .down{color:var(--red)} .flat{color:var(--faint)}
+    .gold{color:var(--accent);font-weight:700} .blue{color:var(--blue);font-weight:700}
+    .tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:700;background:var(--panel2);color:var(--muted)}
+    .tag.ah{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+    .tag.bz{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+    .chg{font-weight:700;font-size:12.5px;white-space:nowrap}
+
+    /* tables */
+    .tablecard{overflow:hidden}
+    .tscroll{overflow:auto;max-height:calc(100vh - 290px)}
+    table{width:100%;border-collapse:collapse}
+    th{position:sticky;top:0;background:var(--panel);text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;user-select:none;z-index:1}
+    th.sortable{cursor:pointer} th.sortable:hover{color:var(--text)}
+    th.num{text-align:right}
+    td{padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+    tbody tr{cursor:pointer}
+    tbody tr:hover td{background:var(--hover)}
+    tbody tr:last-child td{border-bottom:0}
+    td.name{font-weight:650;max-width:340px;overflow:hidden;text-overflow:ellipsis}
+    td.name small{display:block;color:var(--faint);font-weight:500;font-size:11.5px}
+    .starbtn{border:0;background:none;color:var(--faint);padding:2px}
+    .starbtn.on{color:var(--accent)} .starbtn:hover{color:var(--accent)}
+    .empty{padding:44px 20px;text-align:center;color:var(--muted)}
+    .more{padding:12px;text-align:center}
+
+    /* lists inside dashboard cards */
+    .list{display:flex;flex-direction:column}
+    .li{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+    .li:last-child{border-bottom:0}
+    .li:hover{background:var(--hover)}
+    .li .n{flex:1;min-width:0;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .li .p{font-variant-numeric:tabular-nums;color:var(--muted);min-width:64px;text-align:right}
+
+    /* toggle */
+    .setrow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 16px;border-bottom:1px solid var(--line)}
+    .setrow:last-child{border-bottom:0}
+    .setrow b{display:block} .setrow span{color:var(--muted);font-size:13px}
+    .switch{position:relative;width:44px;height:25px;border-radius:20px;background:var(--line2);border:0;flex-shrink:0;transition:.15s}
+    .switch::after{content:"";position:absolute;left:3px;top:3px;width:19px;height:19px;border-radius:50%;background:#fff;transition:.15s}
+    .switch.on{background:var(--green)} .switch.on::after{left:22px}
+
+    /* drawer */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.2s;z-index:40}
+    .overlay.on{opacity:1;pointer-events:auto}
+    .drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--shadow);transform:translateX(105%);transition:transform .22s ease;z-index:50;display:flex;flex-direction:column}
+    .drawer.on{transform:none}
+    .d-head{display:flex;justify-content:space-between;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line)}
+    .d-head h2{font-size:18px;margin-bottom:6px}
+    .d-body{padding:20px;overflow-y:auto;flex:1}
+    .price-big{font-size:34px;font-weight:800;letter-spacing:-.02em;margin:2px 0 14px}
+    .kv{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0}
+    .kv div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+    .kv small{display:block;color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+    .kv b{font-size:16px}
+    .chartbox{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px}
+    .chartbox svg{display:block;width:100%;height:auto}
+    .tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;font-size:12px;box-shadow:var(--shadow);transform:translate(-50%,-120%);white-space:nowrap;display:none}
+    .alertbox{margin-top:18px;padding:14px;border:1px solid var(--line);border-radius:10px}
+    .alertbox label{display:block;color:var(--muted);font-size:12px;font-weight:600;margin-bottom:4px}
+
+    /* toasts */
+    .toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:60}
+    .toast{background:var(--panel);border:1px solid var(--line2);border-left:4px solid var(--accent);padding:11px 16px;border-radius:10px;box-shadow:var(--shadow);max-width:340px;font-weight:600;animation:in .2s ease}
+    .toast.good{border-left-color:var(--green)} .toast.bad{border-left-color:var(--red)}
+    @keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+    @media (max-width:900px){
+      .side{position:fixed;inset:0 auto 0 0;transform:translateX(-105%);transition:.2s;box-shadow:var(--shadow)}
+      .side.on{transform:none}
+      .menu{display:grid}
+      #view{padding:16px} .top{padding:10px 14px}
+      .pill .t{display:none}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="brand"><div class="logo">PT</div><div><b>Price Tracker</b><small>Skyblock market</small></div></div>
+    <nav id="nav"></nav>
+    <div class="side-foot" id="sideFoot">Connecting…</div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <button class="icon-btn menu" id="menuBtn" aria-label="Menu"></button>
+      <div class="gsearch" id="gs"><input id="gsearch" placeholder="Search items…   press / to focus" autocomplete="off"></div>
+      <div class="pill" id="statusPill"><i class="dot" id="dot"></i><span class="t" id="statusText">Connecting…</span></div>
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle theme"></button>
+    </header>
+    <main id="view"></main>
+  </div>
+</div>
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+<div class="toasts" id="toasts"></div>
+
+<script>
+  'use strict';
+  /* =============== helpers =============== */
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const ICON = {
+    dashboard:'<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>',
+    market:'<path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.3 2.3a1 1 0 0 0 .7 1.7H17"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/>',
+    trend:'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
+    flips:'<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+    star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    calc:'<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8" y2="10.01"/><line x1="12" y1="10" x2="12" y2="10.01"/><line x1="16" y1="10" x2="16" y2="10.01"/><line x1="8" y1="14" x2="8" y2="14.01"/><line x1="12" y1="14" x2="12" y2="14.01"/><line x1="16" y1="14" x2="16" y2="14.01"/><line x1="8" y1="18" x2="16" y2="18"/>',
+    settings:'<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+    search:'<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    moon:'<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    sun:'<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+    x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    menu:'<line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>',
+    down:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    box:'<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
+    clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'
+  };
+  const ic = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`;
+
+  function fmt(n) {
+    if (!n || n <= 0) return '—';
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return Math.round(n).toLocaleString();
+  }
+  const full = n => Math.round(n).toLocaleString() + ' coins';
+  function ago(ms) {
+    if (!ms) return '—';
+    const s = (Date.now() - ms) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+  function median(a) {
+    if (!a.length) return 0;
+    const c = a.slice().sort((x, y) => x - y), m = c.length >> 1;
+    return c.length % 2 ? c[m] : (c[m - 1] + c[m]) / 2;
+  }
+  function trendOf(h) {           // same maths as the in-game GUI
+    const n = h.length;
+    if (n < 2) return 0;
+    const r = n >= 6 ? 3 : 1, from = Math.max(0, n - r - 10);
+    const recent = median(h.slice(n - r)), base = median(h.slice(from, n - r));
+    return base > 0 ? (recent - base) / base * 100 : 0;
+  }
+  const marginOf = i => { if (!(i.source === 'BZ' && i.sellPrice > 0 && i.lowestBin > 0)) return 0; const m = (i.lowestBin * 0.9875 - i.sellPrice) / i.sellPrice * 100; return m > 300 ? 0 : m; };  // >300% = bad data
+  const keyOf = i => (i.source === 'BZ' ? 'bz:' : '') + i.name.toLowerCase();
+  function parseCoins(s) {
+    s = String(s || '').trim().toLowerCase().replace(/[, ]/g, '');
+    if (!s) return 0;
+    let m = 1; const l = s.slice(-1);
+    if (l === 'k') m = 1e3; else if (l === 'm') m = 1e6; else if (l === 'b') m = 1e9;
+    if (m !== 1) s = s.slice(0, -1);
+    const v = parseFloat(s) * m;
+    return isFinite(v) && v > 0 ? v : 0;
+  }
+  function chg(t) {
+    if (Math.abs(t) < 0.05) return '<span class="chg flat">—</span>';
+    return `<span class="chg ${t > 0 ? 'up' : 'down'}">${t > 0 ? '▲' : '▼'} ${Math.abs(t).toFixed(1)}%</span>`;
+  }
+  function spark(h, w = 84, ht = 24) {
+    if (!h || h.length < 2) return '<span class="faint">—</span>';
+    h = h.slice(-30);
+    const min = Math.min(...h), max = Math.max(...h), r = (max - min) || 1;
+    const pts = h.map((v, i) => (i * (w / (h.length - 1))).toFixed(1) + ',' + (ht - 2 - ((v - min) / r) * (ht - 4)).toFixed(1)).join(' ');
+    const col = h[h.length - 1] >= h[0] ? 'var(--green)' : 'var(--red)';
+    return `<svg width="${w}" height="${ht}" viewBox="0 0 ${w} ${ht}"><polyline fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" points="${pts}"/></svg>`;
+  }
+  function toast(msg, kind) {
+    const el = document.createElement('div');
+    el.className = 'toast ' + (kind || '');
+    el.textContent = msg;
+    $('#toasts').appendChild(el);
+    setTimeout(() => el.remove(), 5000);
+  }
+  // On the public website there is no mod, so watchlist + settings are kept in this browser.
+  const REMOTE = !/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  const LS = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+  function localPost(path, b) {
+    if (path === '/api/watch') {
+      const w = LS.get('pt_watch', {}); const c = w[b.key] || { watched: false, above: 0, below: 0 };
+      if (b.watched !== undefined) { c.watched = !!b.watched; if (!c.watched) { c.above = 0; c.below = 0; } }
+      if (b.above !== undefined) c.above = Math.max(0, b.above || 0);
+      if (b.below !== undefined) c.below = Math.max(0, b.below || 0);
+      if ((b.above !== undefined || b.below !== undefined) && (c.above > 0 || c.below > 0) && b.watched !== false) c.watched = true;
+      if (c.watched) w[b.key] = c; else delete w[b.key];
+      LS.set('pt_watch', w); return { ok: true };
+    }
+    if (path === '/api/settings') { const st = LS.get('pt_settings', {}); st[b.key] = !!b.value; LS.set('pt_settings', st); return { ok: true }; }
+    return { ok: true, removed: 0 };
+  }
+  function applyLocal(items, st) {
+    const w = LS.get('pt_watch', {}); let n = 0;
+    items.forEach(i => { const c = w[keyOf(i)]; i.watched = !!c; i.alertAbove = c ? c.above : 0; i.alertBelow = c ? c.below : 0; if (c) n++; });
+    st.watched = n; st.settings = Object.assign({}, st.settings, LS.get('pt_settings', {}));
+  }
+  async function post(path, body) {
+    if (REMOTE) return localPost(path, body || {});
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+      return await r.json();
+    } catch (e) { toast('Could not reach the mod. Is Minecraft running?', 'bad'); return null; }
+  }
+
+  /* =============== state =============== */
+  const S = { items: [], status: null, online: false, view: 'dashboard', q: '', src: 'ALL', cat: 'All',
+    sort: { col: 'name', dir: 1 }, limit: 200, sel: null, fired: new Set() };
+  const CATS = ['All','Weapons','Armor','Accessories','Tools','Pets','Enchanted Books','Dungeon Items','Enchanted Materials','Raw Materials','Other'];
+
+  function prepare(list) {
+    list.forEach(i => {
+      i.history = i.history || [];
+      i._key = keyOf(i); i._cat = i.category || 'Other';
+      i._trend = trendOf(i.history); i._margin = marginOf(i);
+      i.lowestBin = i.lowestBin || 0; i.sellPrice = i.sellPrice || 0; i.avgPrice = i.avgPrice || 0;
+    });
+  }
+  const byKey = k => S.items.find(i => i._key === k);
+
+  /* =============== shared renderers =============== */
+  function marketTag(i) { return `<span class="tag ${i.source === 'BZ' ? 'bz' : 'ah'}">${i.source === 'BZ' ? 'Bazaar' : 'Auction'}</span>`; }
+  function starBtn(i) { return `<button class="starbtn ${i.watched ? 'on' : ''}" data-star="${esc(i._key)}" title="${i.watched ? 'Remove from watchlist' : 'Add to watchlist'}">${ic('star', 16).replace('fill="none"', i.watched ? 'fill="currentColor"' : 'fill="none"')}</button>`; }
+  function listCard(title, icon, items, right, empty) {
+    const rows = items.length ? items.map(i => `<div class="li" data-open="${esc(i._key)}">
+      <div class="n">${esc(i.name)}</div>${marketTag(i)}<div class="p">${fmt(i.lowestBin)}</div><div>${right(i)}</div></div>`).join('')
+            : `<div class="empty">${empty}</div>`;
+    return `<div class="card"><div class="card-h"><h2>${ic(icon, 17)} ${title}</h2></div><div class="list">${rows}</div></div>`;
+  }
+  const movers = () => S.items.filter(i => i.history.length >= 3 && Math.abs(i._trend) >= 0.1);
+  const flips = () => S.items.filter(i => i._margin > 0).sort((a, b) => b._margin - a._margin);
+
+  function itemRow(i) {
+    const bz = i.source === 'BZ';
+    return `<tr data-open="${esc(i._key)}">
+    <td>${starBtn(i)}</td>
+    <td class="name">${esc(i.name)}<small>${esc(i._cat)}</small></td>
+    <td>${marketTag(i)}</td>
+    <td class="num gold" title="${full(i.lowestBin)}">${fmt(i.lowestBin)}</td>
+    <td class="num">${bz && i.sellPrice > 0 ? `<span class="blue" title="${full(i.sellPrice)}">${fmt(i.sellPrice)}</span>` : '<span class="faint">—</span>'}</td>
+    <td class="num muted">${fmt(i.avgPrice)}</td>
+    <td>${spark(i.history)} ${chg(i._trend)}</td>
+    <td class="num muted">${ago(i.lastSeen)}</td></tr>`;
+  }
+
+  /* =============== views =============== */
+  const VIEWS = {};
+
+  VIEWS.dashboard = {
+    title: 'Dashboard',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Dashboard</h1><p class="sub">Live overview of everything your game has scanned.</p></div></div>
+      <div class="grid stats" id="dStats"></div>
+      <div class="grid cols2" id="dLists"></div>`;
+    },
+    update() {
+      const st = S.status || {}, now = Date.now();
+      const last = st.lastScan ? ago(st.lastScan) : 'Never';
+      $('#dStats').innerHTML = [
+        ['box', 'Items tracked', st.total || 0, 'across both markets'],
+        ['market', 'Auction House', st.ah || 0, 'lowest BIN prices'],
+        ['trend', 'Bazaar', st.bz || 0, 'buy / sell prices'],
+        ['star', 'Watchlist', st.watched || 0, 'with optional alerts'],
+        ['clock', 'Last scan', last, st.settings && !st.settings.scan ? 'scanning is OFF' : 'auto scanning']
+      ].map(([ic_, l, v, s]) => `<div class="card stat"><div class="l">${ic(ic_, 15)} ${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+
+      const m = movers();
+      const rise = m.slice().sort((a, b) => b._trend - a._trend).filter(i => i._trend > 0).slice(0, 6);
+      const fall = m.slice().sort((a, b) => a._trend - b._trend).filter(i => i._trend < 0).slice(0, 6);
+      const fl = flips().slice(0, 6);
+      const rec = S.items.slice().sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0)).slice(0, 6);
+      $('#dLists').innerHTML =
+              listCard('Top risers', 'trend', rise, i => chg(i._trend), 'Needs a few scans over time.') +
+              listCard('Top fallers', 'trend', fall, i => chg(i._trend), 'No falling prices yet.') +
+              listCard('Best Bazaar flips', 'flips', fl, i => `<span class="chg up">+${i._margin.toFixed(1)}%</span>`, 'Browse the Bazaar to find flips.') +
+              listCard('Recently updated', 'clock', rec, i => `<span class="faint">${ago(i.lastSeen)}</span>`, 'Open the Auction House or Bazaar in game.');
+    }
+  };
+
+  const COLS = [
+    { id: 'name',  label: 'Item',    sort: (a, b) => a.name.localeCompare(b.name) },
+    { id: 'src',   label: 'Market',  sort: (a, b) => a.source.localeCompare(b.source) },
+    { id: 'price', label: 'Price',   num: 1, sort: (a, b) => a.lowestBin - b.lowestBin },
+    { id: 'sell',  label: 'Sell',    num: 1, sort: (a, b) => a.sellPrice - b.sellPrice },
+    { id: 'avg',   label: 'Average', num: 1, sort: (a, b) => a.avgPrice - b.avgPrice },
+    { id: 'trend', label: 'Trend',   sort: (a, b) => a._trend - b._trend },
+    { id: 'seen',  label: 'Updated', num: 1, sort: (a, b) => (a.lastSeen || 0) - (b.lastSeen || 0) }
+  ];
+
+  VIEWS.market = {
+    title: 'Market',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Market</h1><p class="sub" id="mSub"></p></div></div>
+      <div class="toolbar"><div class="seg" id="srcSeg">
+        <button data-v="ALL">All</button><button data-v="AH">Auction</button><button data-v="BZ">Bazaar</button></div></div>
+      <div class="chips" id="chips"></div>
+      <div class="card tablecard"><div class="tscroll"><table>
+        <thead><tr><th></th>${COLS.map(c => `<th class="sortable ${c.num ? 'num' : ''}" data-col="${c.id}">${c.label}<span class="sortmark"></span></th>`).join('')}</tr></thead>
+        <tbody id="mBody"></tbody></table></div>
+        <div class="empty" id="mEmpty" style="display:none"></div><div class="more" id="mMore"></div></div>`;
+      $('#srcSeg').onclick = e => { const b = e.target.closest('button'); if (b) { S.src = b.dataset.v; S.limit = 200; this.update(); } };
+      $('#chips').onclick = e => { const b = e.target.closest('.chip'); if (b) { S.cat = b.dataset.c; S.limit = 200; this.update(); } };
+      $('thead', el).onclick = e => {
+        const th = e.target.closest('th[data-col]'); if (!th) return;
+        S.sort = S.sort.col === th.dataset.col ? { col: th.dataset.col, dir: -S.sort.dir } : { col: th.dataset.col, dir: th.dataset.col === 'name' ? 1 : -1 };
+        this.update();
+      };
+      $('#mMore').onclick = e => { if (e.target.closest('button')) { S.limit += 300; this.update(); } };
+    },
+    update() {
+      const q = S.q.trim().toLowerCase();
+      $$('#srcSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === S.src));
+      const base = S.items.filter(i => (S.src === 'ALL' || i.source === S.src) && (!q || i.name.toLowerCase().includes(q)));
+      const counts = {}; base.forEach(i => counts[i._cat] = (counts[i._cat] || 0) + 1);
+      $('#chips').innerHTML = CATS.map(c => `<button class="chip ${S.cat === c ? 'on' : ''}" data-c="${c}">${c}<i>${c === 'All' ? base.length : (counts[c] || 0)}</i></button>`).join('');
+      const list = base.filter(i => S.cat === 'All' || i._cat === S.cat);
+      const col = COLS.find(c => c.id === S.sort.col) || COLS[0];
+      list.sort((a, b) => col.sort(a, b) * S.sort.dir);
+      $$('th[data-col]').forEach(th => th.querySelector('.sortmark').textContent = th.dataset.col === col.id ? (S.sort.dir > 0 ? ' ↑' : ' ↓') : '');
+      $('#mSub').textContent = `${list.length.toLocaleString()} item${list.length === 1 ? '' : 's'}${q ? ` matching “${S.q}”` : ''}`;
+      $('#mBody').innerHTML = list.slice(0, S.limit).map(itemRow).join('');
+      const empty = $('#mEmpty');
+      empty.style.display = list.length ? 'none' : 'block';
+      empty.textContent = S.items.length ? 'No items match your filters.' : 'No items yet. Open the Auction House or Bazaar in game and flip through the pages.';
+      $('#mMore').innerHTML = list.length > S.limit ? `<button class="btn ghost">Show ${Math.min(300, list.length - S.limit)} more</button>` : '';
+    }
+  };
+
+  VIEWS.movers = {
+    title: 'Movers',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Price movers</h1><p class="sub">Biggest changes, comparing the newest prices to the recent average. Needs at least 3 scans per item.</p></div></div>
+      <div class="grid cols2" id="mvCols"></div>`;
+    },
+    update() {
+      const m = movers();
+      const rise = m.filter(i => i._trend > 0).sort((a, b) => b._trend - a._trend).slice(0, 25);
+      const fall = m.filter(i => i._trend < 0).sort((a, b) => a._trend - b._trend).slice(0, 25);
+      $('#mvCols').innerHTML = listCard('Risers', 'trend', rise, i => chg(i._trend), 'Nothing rising yet.') + listCard('Fallers', 'trend', fall, i => chg(i._trend), 'Nothing falling yet.');
+    }
+  };
+
+  VIEWS.flips = {
+    title: 'Flips',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Bazaar flips</h1><p class="sub">Profit from buying at the Sell price and selling at the Buy price, after the 1.25% Bazaar tax.</p></div></div>
+      <div class="card tablecard"><div class="tscroll"><table><thead><tr><th>Item</th><th class="num">Buy</th><th class="num">Sell</th><th class="num">Profit / item</th><th class="num">Margin</th><th class="num">Updated</th></tr></thead>
+      <tbody id="fBody"></tbody></table></div><div class="empty" id="fEmpty" style="display:none">No Bazaar items with both buy and sell prices yet. Browse the Bazaar in game.</div></div>`;
+    },
+    update() {
+      const q = S.q.trim().toLowerCase();
+      const list = flips().filter(i => !q || i.name.toLowerCase().includes(q)).slice(0, 200);
+      $('#fBody').innerHTML = list.map(i => {
+        const profit = i.lowestBin * 0.9875 - i.sellPrice;
+        return `<tr data-open="${esc(i._key)}"><td class="name">${esc(i.name)}<small>${esc(i._cat)}</small></td>
+        <td class="num gold">${fmt(i.lowestBin)}</td><td class="num blue">${fmt(i.sellPrice)}</td>
+        <td class="num up">+${fmt(profit)}</td><td class="num up"><b>+${i._margin.toFixed(1)}%</b></td><td class="num muted">${ago(i.lastSeen)}</td></tr>`;
+      }).join('');
+      $('#fEmpty').style.display = list.length ? 'none' : 'block';
+    }
+  };
+
+  VIEWS.watch = {
+    title: 'Watchlist',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Watchlist &amp; alerts</h1><p class="sub">Alerts are checked against every new scan. They also fire in game, with chat message and sound.</p></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="card-b row">
+        <input class="field" id="wItem" list="wList" placeholder="Item to watch…" style="width:280px">
+        <input class="field" id="wAbove" placeholder="Alert above (e.g. 1.5m)" style="width:190px">
+        <input class="field" id="wBelow" placeholder="Alert below (e.g. 200k)" style="width:190px">
+        <button class="btn" id="wAdd">Add</button></div></div>
+      <datalist id="wList"></datalist>
+      <div class="card tablecard"><div class="tscroll"><table><thead><tr><th>Item</th><th>Market</th><th class="num">Price</th><th class="num">Above</th><th class="num">Below</th><th>Status</th><th></th></tr></thead>
+      <tbody id="wBody"></tbody></table></div><div class="empty" id="wEmpty" style="display:none">Your watchlist is empty. Click the star next to any item.</div></div>`;
+      $('#wAdd').onclick = async () => {
+        const it = S.items.find(i => `${i.name} [${i.source === 'BZ' ? 'BZ' : 'AH'}]`.toLowerCase() === $('#wItem').value.trim().toLowerCase())
+                || S.items.find(i => i.name.toLowerCase() === $('#wItem').value.trim().toLowerCase());
+        if (!it) { toast('Pick an item from the list (it must be scanned first).', 'bad'); return; }
+        const body = { key: it._key, watched: true };
+        const a = parseCoins($('#wAbove').value), b = parseCoins($('#wBelow').value);
+        if (a) body.above = a; if (b) body.below = b;
+        await post('/api/watch', body);
+        $('#wItem').value = $('#wAbove').value = $('#wBelow').value = '';
+        toast('Added to watchlist', 'good'); refresh();
+      };
+      $('#wBody').onclick = async e => {
+        const rm = e.target.closest('[data-rm]');
+        if (rm) { e.stopPropagation(); await post('/api/watch', { key: rm.dataset.rm, watched: false }); refresh(); }
+      };
+    },
+    update() {
+      const dl = $('#wList');
+      if (dl.dataset.n !== String(S.items.length)) {
+        dl.innerHTML = S.items.map(i => `<option value="${esc(i.name)} [${i.source === 'BZ' ? 'BZ' : 'AH'}]">`).join('');
+        dl.dataset.n = S.items.length;
+      }
+      const list = S.items.filter(i => i.watched).sort((a, b) => a.name.localeCompare(b.name));
+      $('#wBody').innerHTML = list.map(i => {
+        let status = '<span class="faint">Watching</span>';
+        if (i.alertAbove > 0 && i.lowestBin >= i.alertAbove) status = '<span class="chg up">Above target</span>';
+        else if (i.alertBelow > 0 && i.lowestBin <= i.alertBelow) status = '<span class="chg down">Below target</span>';
+        return `<tr data-open="${esc(i._key)}"><td class="name">${esc(i.name)}</td><td>${marketTag(i)}</td>
+        <td class="num gold">${fmt(i.lowestBin)}</td><td class="num">${fmt(i.alertAbove)}</td><td class="num">${fmt(i.alertBelow)}</td>
+        <td>${status}</td><td class="num"><button class="btn ghost sm" data-rm="${esc(i._key)}">Remove</button></td></tr>`;
+      }).join('');
+      $('#wEmpty').style.display = list.length ? 'none' : 'block';
+    }
+  };
+
+  VIEWS.calc = {
+    title: 'Chest calculator',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Dungeon chest calculator</h1><p class="sub">Paste the loot of a chest to see if it is worth opening. Stacks can be written as <code>2x Item</code> or <code>Item x33</code>. Loot is valued at the sell price when known, otherwise the lowest BIN.</p></div></div>
+      <div class="card"><div class="card-b">
+        <div class="row" style="margin-bottom:12px"><input class="field" id="cCost" placeholder="Chest cost in coins (e.g. 2m)" style="width:260px"></div>
+        <textarea class="field" id="cLoot" placeholder="One item per line, or comma separated&#10;Shadow Fury&#10;Undead Essence x33&#10;2x Wither Essence"></textarea>
+        <div class="row" style="margin-top:12px"><button class="btn" id="cBtn">Calculate</button></div>
+        <div id="cOut" style="margin-top:18px"></div></div></div>`;
+      $('#cBtn').onclick = () => {
+        const cost = parseCoins($('#cCost').value);
+        const entries = $('#cLoot').value.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+        let total = 0, unknown = 0, rows = '';
+        entries.forEach(e => {
+          let qty = 1, name = e, m;
+          if ((m = e.match(/^(\d+)\s*x\s+(.+)$/i))) { qty = +m[1]; name = m[2]; }
+          else if ((m = e.match(/^(.+?)\s+x\s*(\d+)$/i))) { qty = +m[2]; name = m[1]; }
+          const l = name.toLowerCase();
+          const f = S.items.find(i => i.source !== 'BZ' && i.name.toLowerCase() === l) || S.items.find(i => i.name.toLowerCase() === l)
+                  || S.items.find(i => i.name.toLowerCase() === 'enchanted book (' + l + ')');
+          const val = f ? (f.sellPrice > 0 ? f.sellPrice : f.lowestBin) * qty : 0;
+          if (!f) unknown++;
+          total += val;
+          rows += `<tr><td class="name">${esc(name)}${qty > 1 ? ` <span class="faint">×${qty}</span>` : ''}</td><td>${f ? marketTag(f) : ''}</td>
+          <td class="num ${f ? 'gold' : 'down'}">${f ? fmt(val) : 'Unknown'}</td></tr>`;
+        });
+        const net = total - cost;
+        $('#cOut').innerHTML = `<div class="card tablecard"><table><tbody>${rows}</tbody></table></div>
+        <div class="grid stats" style="margin:16px 0 0">
+          <div class="card stat"><div class="l">Loot value</div><div class="v">${fmt(total)}</div></div>
+          <div class="card stat"><div class="l">Chest cost</div><div class="v">${fmt(cost)}</div></div>
+          <div class="card stat"><div class="l">${net >= 0 ? 'Profit' : 'Loss'}</div><div class="v ${net >= 0 ? 'up' : 'down'}">${net >= 0 ? '+' : '−'}${fmt(Math.abs(net))}</div>
+          ${unknown ? `<div class="s">${unknown} unknown item${unknown > 1 ? 's' : ''} counted as 0</div>` : ''}</div></div>`;
+      };
+    },
+    update() {}
+  };
+
+  const SETTINGS = [
+    { k: 'tooltips',   t: 'Item price lines',          d: 'Show Lowest BIN / Buy / Sell under item tooltips in game.' },
+    { k: 'chestCalc',  t: 'Dungeon chest calculator',  d: 'Profit overlay beside dungeon reward chests.' },
+    { k: 'scan',       t: 'Auto scan AH + Bazaar',     d: 'Read prices automatically while you browse the menus.' },
+    { k: 'scanChat',   t: 'Scan chat messages',        d: 'Print “Scanned prices” in chat after a scan.' },
+    { k: 'alertSound', t: 'Alert sound',               d: 'Play a sound in game when a price alert triggers.' }
+  ];
+
+  VIEWS.settings = {
+    title: 'Settings',
+    mount(el) {
+      el.innerHTML = `<div class="page-head"><div><h1>Settings</h1><p class="sub">Changes apply instantly in game and are saved automatically.</p></div></div>
+      <div class="grid cols2">
+        <div class="card"><div class="card-h"><h2>In-game features</h2></div><div id="sList"></div></div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div class="card"><div class="card-h"><h2>Appearance</h2></div><div class="card-b"><div class="seg" id="themeSeg">
+            <button data-t="auto">Auto</button><button data-t="dark">Dark</button><button data-t="light">Light</button></div></div></div>
+          <div class="card"><div class="card-h"><h2>Data</h2></div><div class="card-b row">
+            <button class="btn ghost" id="exJson">${ic('down', 15)} Export JSON</button>
+            <button class="btn ghost" id="exCsv">${ic('down', 15)} Export CSV</button>
+            <button class="btn danger" id="purge">Remove junk entries</button></div>
+            <div class="card-b muted" style="padding-top:0">“Junk” are menu buttons such as <i>Buy Instantly</i> that older versions saved as items.</div></div>
+        </div></div>`;
+      $('#sList').onclick = async e => {
+        const b = e.target.closest('.switch'); if (!b) return;
+        const k = b.dataset.k, v = !b.classList.contains('on');
+        b.classList.toggle('on', v);
+        if (S.status) S.status.settings[k] = v;
+        await post('/api/settings', { key: k, value: v });
+      };
+      $('#themeSeg').onclick = e => { const b = e.target.closest('button'); if (b) { setTheme(b.dataset.t); this.update(); } };
+      $('#exJson').onclick = () => download('pricetracker.json', JSON.stringify(S.items.map(({ _key, _cat, _trend, _margin, ...r }) => r), null, 2), 'application/json');
+      $('#exCsv').onclick = () => {
+        const head = 'name,market,category,price,sell,average,trend_pct,samples,last_seen';
+        const rows = S.items.map(i => [i.name, i.source, i._cat, Math.round(i.lowestBin), Math.round(i.sellPrice), Math.round(i.avgPrice), i._trend.toFixed(2), i.history.length, i.lastSeen ? new Date(i.lastSeen).toISOString() : '']
+                .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','));
+        download('pricetracker.csv', [head, ...rows].join('\n'), 'text/csv');
+      };
+      $('#purge').onclick = async () => {
+        const r = await post('/api/purge'); if (!r) return;
+        toast(r.removed ? `Removed ${r.removed} junk entr${r.removed === 1 ? 'y' : 'ies'}` : 'Nothing to remove', 'good'); refresh();
+      };
+    },
+    update() {
+      const st = (S.status && S.status.settings) || {};
+      $('#sList').innerHTML = SETTINGS.map(s => `<div class="setrow"><div><b>${s.t}</b><span>${s.d}</span></div>
+      <button class="switch ${st[s.k] ? 'on' : ''}" data-k="${s.k}" aria-label="${s.t}"></button></div>`).join('');
+      $$('#themeSeg button').forEach(b => b.classList.toggle('on', b.dataset.t === (localStorage.getItem('pt_theme') || 'auto')));
+    }
+  };
+
+  function download(name, text, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  /* =============== detail drawer =============== */
+  function openDrawer(key) {
+    const i = byKey(key); if (!i) return;
+    S.sel = key;
+    const d = $('#drawer');
+    d.innerHTML = `<div class="d-head"><div style="min-width:0"><h2>${esc(i.name)}</h2><div class="row">${marketTag(i)}<span class="tag">${esc(i._cat)}</span></div></div>
+      <div class="row" style="flex-wrap:nowrap"><button class="icon-btn" id="dStar" title="Watch">${ic('star', 17)}</button><button class="icon-btn" id="dClose" aria-label="Close">${ic('x', 17)}</button></div></div>
+    <div class="d-body">
+      <div class="muted" style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">${i.source === 'BZ' ? 'Buy price' : 'Lowest BIN'}</div>
+      <div class="price-big" id="dPrice"></div>
+      <div class="chartbox" id="dChart"></div>
+      <div class="kv" id="dKv"></div>
+      <div class="alertbox"><b>Price alerts</b><p class="muted" style="margin:4px 0 12px;font-size:12.5px">Notifies you in game when the price crosses a target. Use k / m / b, e.g. 1.5m.</p>
+        <div class="row" style="flex-wrap:nowrap"><div style="flex:1"><label>Alert above</label><input class="field" id="dAbove" style="width:100%"></div>
+        <div style="flex:1"><label>Alert below</label><input class="field" id="dBelow" style="width:100%"></div></div>
+        <div class="row" style="margin-top:12px"><button class="btn" id="dSave">Save alerts</button><button class="btn ghost" id="dClear">Clear</button></div></div>
+    </div>`;
+    $('#dAbove').value = i.alertAbove > 0 ? Math.round(i.alertAbove) : '';
+    $('#dBelow').value = i.alertBelow > 0 ? Math.round(i.alertBelow) : '';
+    $('#dClose').onclick = closeDrawer;
+    $('#dStar').onclick = async () => { const c = byKey(S.sel); if (c) { await post('/api/watch', { key: c._key, watched: !c.watched }); await refresh(); } };
+    $('#dSave').onclick = async () => {
+      const c = byKey(S.sel); if (!c) return;
+      await post('/api/watch', { key: c._key, above: parseCoins($('#dAbove').value), below: parseCoins($('#dBelow').value) });
+      toast('Alerts saved', 'good'); await refresh();
+    };
+    $('#dClear').onclick = async () => {
+      const c = byKey(S.sel); if (!c) return;
+      $('#dAbove').value = $('#dBelow').value = '';
+      await post('/api/watch', { key: c._key, above: 0, below: 0 }); await refresh();
+    };
+    d.classList.add('on'); $('#overlay').classList.add('on'); d.setAttribute('aria-hidden', 'false');
+    refreshDrawer();
+  }
+  function closeDrawer() { S.sel = null; $('#drawer').classList.remove('on'); $('#overlay').classList.remove('on'); $('#drawer').setAttribute('aria-hidden', 'true'); }
+
+  function refreshDrawer() {
+    const i = byKey(S.sel); if (!i) return;
+    const h = i.history, bz = i.source === 'BZ';
+    $('#dPrice').innerHTML = `<span class="gold" title="${full(i.lowestBin)}">${fmt(i.lowestBin)}</span> ${chg(i._trend)}`;
+    $('#dStar').style.color = i.watched ? 'var(--accent)' : '';
+    $('#dStar').innerHTML = ic('star', 17).replace('fill="none"', i.watched ? 'fill="currentColor"' : 'fill="none"');
+    const hi = h.length ? Math.max(...h) : 0, lo = h.length ? Math.min(...h) : 0;
+    const cells = [['Average', fmt(i.avgPrice)], ['Samples', h.length], ['Highest', fmt(hi)], ['Lowest', fmt(lo)]];
+    if (bz) {
+      const profit = i.lowestBin * 0.9875 - i.sellPrice;
+      cells.unshift(['Sell price', `<span class="blue">${fmt(i.sellPrice)}</span>`], ['Flip margin', i.sellPrice > 0 ? `<span class="${profit >= 0 ? 'up' : 'down'}">${i._margin.toFixed(1)}%</span>` : '—']);
+    }
+    cells.push(['Last updated', ago(i.lastSeen)]);
+    $('#dKv').innerHTML = cells.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('');
+    mountChart($('#dChart'), h);
+  }
+
+  function mountChart(el, h) {
+    if (h.length < 2) { el.innerHTML = '<div class="empty" style="padding:40px 10px">Need at least 2 scans to draw a chart.</div>'; return; }
+    const W = Math.max(300, el.clientWidth - 16), H = 210, pl = 54, pr = 10, pt = 12, pb = 22;
+    let lo = Math.min(...h), hi = Math.max(...h);
+    if (hi === lo) { lo *= .97; hi *= 1.03; }
+    const pad = (hi - lo) * .08; lo -= pad; hi += pad;
+    const X = i => pl + i * (W - pl - pr) / (h.length - 1), Y = v => pt + (hi - v) / (hi - lo) * (H - pt - pb);
+    const up = h[h.length - 1] >= h[0], col = up ? 'var(--green)' : 'var(--red)';
+    const line = h.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+    const area = line + ` L${X(h.length - 1).toFixed(1)} ${H - pb} L${X(0).toFixed(1)} ${H - pb} Z`;
+    let grid = '';
+    for (let g = 0; g <= 4; g++) {
+      const v = lo + (hi - lo) * g / 4, y = Y(v).toFixed(1);
+      grid += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-dasharray="3 4"/><text x="${pl - 8}" y="${+y + 4}" text-anchor="end" font-size="11" fill="var(--faint)">${fmt(v)}</text>`;
+    }
+    const avg = h.reduce((a, b) => a + b, 0) / h.length;
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+      <defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${up ? '#34d399' : '#f87171'}" stop-opacity=".28"/><stop offset="1" stop-color="${up ? '#34d399' : '#f87171'}" stop-opacity="0"/></linearGradient></defs>
+      ${grid}<line x1="${pl}" x2="${W - pr}" y1="${Y(avg).toFixed(1)}" y2="${Y(avg).toFixed(1)}" stroke="var(--blue)" stroke-opacity=".6" stroke-dasharray="6 4"/>
+      <path d="${area}" fill="url(#cg)"/><path d="${line}" fill="none" stroke="${col}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+      <text x="${pl}" y="${H - 5}" font-size="11" fill="var(--faint)">oldest</text><text x="${W - pr}" y="${H - 5}" text-anchor="end" font-size="11" fill="var(--faint)">newest</text>
+      <g id="hv" style="display:none"><line id="hl" y1="${pt}" y2="${H - pb}" stroke="var(--muted)" stroke-opacity=".5"/><circle id="hc" r="4.5" fill="${col}" stroke="var(--panel)" stroke-width="2"/></g></svg><div class="tip" id="tip"></div>`;
+    const svg = $('svg', el), tip = $('#tip', el), hv = $('#hv', el);
+    svg.onmousemove = e => {
+      const r = svg.getBoundingClientRect(), mx = (e.clientX - r.left) * (W / r.width);
+      const idx = Math.max(0, Math.min(h.length - 1, Math.round((mx - pl) / ((W - pl - pr) / (h.length - 1)))));
+      const x = X(idx), y = Y(h[idx]);
+      hv.style.display = ''; $('#hl', el).setAttribute('x1', x); $('#hl', el).setAttribute('x2', x);
+      $('#hc', el).setAttribute('cx', x); $('#hc', el).setAttribute('cy', y);
+      const prev = idx ? h[idx - 1] : h[idx], d = prev > 0 ? (h[idx] - prev) / prev * 100 : 0;
+      tip.style.display = 'block'; tip.style.left = (x / W * r.width + 8) + 'px'; tip.style.top = (y / H * r.height + 8) + 'px';
+      tip.innerHTML = `<b>${full(h[idx])}</b><br><span class="muted">Scan #${idx + 1}</span> ${chg(d)}`;
+    };
+    svg.onmouseleave = () => { hv.style.display = 'none'; tip.style.display = 'none'; };
+  }
+
+  /* =============== alerts (browser toasts) =============== */
+  function checkAlerts() {
+    S.items.forEach(i => {
+      if (!i.watched) return;
+      [['a', i.alertAbove > 0 && i.lowestBin >= i.alertAbove, `${i.name} rose above ${fmt(i.alertAbove)} (now ${fmt(i.lowestBin)})`],
+        ['b', i.alertBelow > 0 && i.lowestBin > 0 && i.lowestBin <= i.alertBelow, `${i.name} fell below ${fmt(i.alertBelow)} (now ${fmt(i.lowestBin)})`]]
+              .forEach(([t, hit, msg]) => {
+                const k = i._key + t;
+                if (hit && !S.fired.has(k)) { S.fired.add(k); if (S.firstLoadDone) toast('🔔 ' + msg); }
+                else if (!hit) S.fired.delete(k);
+              });
+    });
+    S.firstLoadDone = true;
+  }
+
+  /* =============== shell: nav, routing, theme, polling =============== */
+  const NAV = [['dashboard', 'dashboard', 'Dashboard'], ['market', 'market', 'Market'], ['movers', 'trend', 'Movers'], ['flips', 'flips', 'Bazaar flips'],
+    ['watch', 'star', 'Watchlist'], ['calc', 'calc', 'Chest calculator'], ['settings', 'settings', 'Settings']];
+
+  function renderNav() {
+    const st = S.status || {};
+    $('#nav').innerHTML = '<div class="navsec">Overview</div>' + NAV.map(([id, icn, label], idx) =>
+            (id === 'calc' ? '<div class="navsec">Tools</div>' : '') +
+            `<button class="nav ${S.view === id ? 'on' : ''}" data-v="${id}">${ic(icn)} ${label}${
+                    id === 'market' && st.total ? `<span class="badge">${st.total}</span>` : id === 'watch' && st.watched ? `<span class="badge">${st.watched}</span>` : ''}</button>`).join('');
+  }
+  $('#nav').onclick = e => { const b = e.target.closest('.nav'); if (b) { location.hash = '#/' + b.dataset.v; $('#side').classList.remove('on'); } };
+
+  function route() {
+    const v = (location.hash.replace(/^#\/?/, '') || 'dashboard');
+    S.view = VIEWS[v] ? v : 'dashboard';
+    closeDrawer();
+    VIEWS[S.view].mount($('#view'));
+    renderNav();
+    VIEWS[S.view].update();
+    document.title = VIEWS[S.view].title + ' · Price Tracker';
+    $('#view').scrollTop = 0;
+  }
+  window.addEventListener('hashchange', route);
+
+  $('#view').addEventListener('click', e => {
+    const star = e.target.closest('[data-star]');
+    if (star) { e.stopPropagation(); const i = byKey(star.dataset.star); if (i) post('/api/watch', { key: i._key, watched: !i.watched }).then(refresh); return; }
+    if (e.target.closest('button,input,select,textarea,a')) return;
+    const o = e.target.closest('[data-open]'); if (o) openDrawer(o.dataset.open);
+  });
+  $('#overlay').onclick = closeDrawer;
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDrawer();
+    if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $('#gsearch').focus(); }
+  });
+  $('#gsearch').oninput = e => {
+    S.q = e.target.value; S.limit = 200;
+    if (S.view !== 'market' && S.view !== 'flips') location.hash = '#/market'; else VIEWS[S.view].update();
+  };
+  $('#gs').insertAdjacentHTML('afterbegin', ic('search', 16));
+  $('#menuBtn').innerHTML = ic('menu'); $('#menuBtn').onclick = () => $('#side').classList.toggle('on');
+
+  function setTheme(t) {
+    localStorage.setItem('pt_theme', t);
+    const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    $('#themeBtn').innerHTML = ic(dark ? 'sun' : 'moon');
+  }
+  $('#themeBtn').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  try { setTheme(localStorage.getItem('pt_theme') || 'auto'); } catch (e) { setTheme('dark'); }
+
+  function renderStatus() {
+    const st = S.status;
+    $('#dot').classList.toggle('live', S.online);
+    let txt, foot;
+    if (!S.online) { txt = 'Disconnected'; foot = 'Start Minecraft with the mod to see live data.'; }
+    else if (st && !st.settings.scan) { txt = 'Scanning paused'; foot = `${st.total} items · scan is OFF`; }
+    else { txt = st && st.lastScan ? 'Live · scanned ' + ago(st.lastScan) : 'Live · waiting for a scan'; foot = `${st ? st.total : 0} items tracked`; }
+    $('#statusText').textContent = txt; $('#sideFoot').textContent = foot;
+    const old = $('#offline');
+    if (!S.online && !old) $('#view').insertAdjacentHTML('afterbegin', '<div class="banner" id="offline">Can’t reach the server. If it was asleep, wait a minute and it will reconnect.</div>');
+    if (S.online && old) old.remove();
+  }
+
+  let busy = false;
+  async function refresh() {
+    if (busy) return; busy = true;
+    try {
+      const [p, st] = await Promise.all([fetch('/api/prices').then(r => r.json()), fetch('/api/status').then(r => r.json())]);
+      if (REMOTE) applyLocal(p.map(i => Object.assign(i, { _t: 0 })), st); S.items = p; prepare(S.items); S.status = st; S.online = true;
+    } catch (e) { S.online = false; }
+    busy = false;
+    renderStatus();
+    if (S.online) {
+      renderNav(); checkAlerts();
+      const active = document.activeElement;
+      if (!(active && active.closest('#view') && /INPUT|TEXTAREA/.test(active.tagName) && S.view !== 'market')) VIEWS[S.view].update();
+      if (S.sel) refreshDrawer();
+    }
+  }
+  route();
+  refresh();
+  setInterval(refresh, 3000);
+</script>
+</body>
+</html>
