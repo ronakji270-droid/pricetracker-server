@@ -19,7 +19,7 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const MAX_BODY = 256 * 1024;       // bytes per request
 const MAX_ITEMS_PER_POST = 300;
 const MAX_DB_ITEMS = 60000;
-const MAX_HISTORY = 30;
+const MAX_HISTORY = 100;
 const MAX_PRICE = 1e12;
 const RATE_PER_MIN = 120;          // requests per IP per minute
 const CATEGORIES = new Set(['Weapons', 'Armor', 'Accessories', 'Tools', 'Pets', 'Enchanted Books',
@@ -99,8 +99,27 @@ const server = http.createServer((req, res) => {
 
   const url = new URL(req.url, 'http://x');
 
-  if (req.method === 'GET' && url.pathname === '/') {
+  // website (the same dashboard the mod shows locally)
+  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    try {
+      const html = fs.readFileSync(path.join(__dirname, 'index.html'));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(html);
+    } catch (e) {
+      return send(res, 200, 'Price Tracker server OK - ' + Object.keys(db).length + ' items\n', 'text/plain; charset=utf-8');
+    }
+  }
+  if (req.method === 'GET' && url.pathname === '/health') {
     return send(res, 200, 'Price Tracker server OK - ' + Object.keys(db).length + ' items\n', 'text/plain; charset=utf-8');
+  }
+  if (req.method === 'GET' && url.pathname === '/api/prices') {
+    return send(res, 200, Object.values(db));
+  }
+  if (req.method === 'GET' && url.pathname === '/api/status') {
+    let ah = 0, bz = 0, last = 0;
+    for (const k in db) { if (db[k].source === 'BZ') bz++; else ah++; if (db[k].lastSeen > last) last = db[k].lastSeen; }
+    return send(res, 200, { total: ah + bz, ah, bz, watched: 0, lastScan: last, now: Date.now(),
+      settings: { tooltips: true, chestCalc: true, scan: true, scanChat: false, alertSound: false } });
   }
 
   if (req.method === 'GET' && url.pathname === '/prices') {
@@ -113,7 +132,7 @@ const server = http.createServer((req, res) => {
                      sellPrice: it.sellPrice, avgPrice: it.avgPrice, lastSeen: it.lastSeen });
       }
     }
-    return send(res, 200, { now: Date.now(), items });
+    return send(res, 200, { now: Date.now(), count: Object.keys(db).length, items });
   }
 
   if (req.method === 'POST' && url.pathname === '/submit') {
@@ -139,6 +158,13 @@ const server = http.createServer((req, res) => {
 
   send(res, 404, { error: 'not found' });
 });
+
+// keep the free Render server awake (Render sets RENDER_EXTERNAL_URL itself)
+if (process.env.RENDER_EXTERNAL_URL) {
+  setInterval(() => {
+    http.get(process.env.RENDER_EXTERNAL_URL + '/health', r => r.resume()).on('error', () => {});
+  }, 10 * 60 * 1000).unref();
+}
 
 load();
 server.listen(PORT, () => console.log('Price Tracker server on port ' + PORT));
