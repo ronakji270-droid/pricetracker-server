@@ -76,6 +76,11 @@ function accept(e, now) {
     if (Object.keys(db).length >= MAX_DB_ITEMS) return false;
     it = db[key] = { name, source, category: 'Other', lowestBin: 0, sellPrice: 0, avgPrice: 0, history: [], lastSeen: 0 };
   }
+  // a player's own price history (sent with the one-time upload) fills the graphs / risers / fallers at once
+  if (Array.isArray(e.history) && e.history.length > it.history.length) {
+    const h = e.history.slice(-MAX_HISTORY).map(Number).filter(v => isFinite(v) && v > 0 && v <= MAX_PRICE);
+    if (h.length > it.history.length) it.history = h;
+  }
   if (it.history[it.history.length - 1] !== price) it.history.push(price);
   while (it.history.length > MAX_HISTORY) it.history.shift();
   it.lowestBin = price;
