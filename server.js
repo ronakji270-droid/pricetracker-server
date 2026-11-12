@@ -29,23 +29,109 @@ const CATEGORIES = new Set(['Weapons', 'Armor', 'Accessories', 'Tools', 'Pets', 
 let db = {};            // key -> item
 let dirty = false;
 
-function load() {
-  try { db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) || {}; }
-  catch (e) { db = {}; }
-  console.log('Loaded ' + Object.keys(db).length + ' items');
+// Optional permanent backup in Upstash Redis (free). Survives Render restarts / redeploys.
+// Turned on by the env vars UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.
+const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const useRemote = !!(REDIS_URL && REDIS_TOKEN);
+const CHUNK = 250;                 // items per Redis value (keeps every request small)
+const REMOTE_EVERY_MS = 120000;    // remote save at most every 2 minutes (free plan has a monthly command limit)
+let remoteReady = false;           // true once Redis was read (or is known to be empty) -> safe to overwrite it
+let remoteGen = 0, remoteChunks = 0, lastRemote = 0;
+if (useRemote) console.log('Upstash Redis backup ON');
+
+async function redis(cmd) {
+  const r = await fetch(REDIS_URL, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + REDIS_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmd)
+  });
+  if (!r.ok) throw new Error('Redis HTTP ' + r.status);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j.result;
 }
-function save() {
-  if (!dirty) return;
+
+function mergeDb(remote) {            // keep whichever copy of an item is newer
+  let n = 0;
+  for (const k in remote) {
+    if (!db[k] || (remote[k].lastSeen || 0) > (db[k].lastSeen || 0)) { db[k] = remote[k]; n++; }
+  }
+  return n;
+}
+
+function loadLocal() {
+  try { mergeDb(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) || {}); } catch (e) { /* no local file yet */ }
+}
+
+async function loadRemote() {
+  if (!useRemote || remoteReady) return;
   try {
-    const tmp = DATA_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(db));
-    fs.renameSync(tmp, DATA_FILE);
-    dirty = false;
+    const metaText = await redis(['GET', 'pt:meta']);
+    if (metaText === null) { remoteReady = true; dirty = true; console.log('Upstash is empty - starting fresh'); return; }
+    const meta = JSON.parse(metaText);
+    const all = {};
+    for (let i = 0; i < meta.chunks; i++) {
+      const t = await redis(['GET', 'pt:' + meta.gen + ':' + i]);
+      if (t === null) throw new Error('missing chunk ' + i);
+      Object.assign(all, JSON.parse(t));
+    }
+    const n = mergeDb(all);
+    remoteGen = meta.gen; remoteChunks = meta.chunks;
+    remoteReady = true; dirty = true;
+    console.log('Loaded ' + n + ' items from Upstash');
+  } catch (e) {
+    console.error('Upstash load failed (will retry, not overwriting it):', e.message);
+  }
+}
+
+async function saveRemote() {
+  const keys = Object.keys(db);
+  const chunks = [];
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const part = {};
+    for (const k of keys.slice(i, i + CHUNK)) part[k] = db[k];
+    chunks.push(JSON.stringify(part));
+  }
+  const gen = Date.now();
+  for (let i = 0; i < chunks.length; i++) await redis(['SET', 'pt:' + gen + ':' + i, chunks[i]]);
+  await redis(['SET', 'pt:meta', JSON.stringify({ gen, chunks: chunks.length })]);   // switch to the new copy
+  if (remoteChunks > 0) {                                                          // remove the old copy
+    const old = []; for (let i = 0; i < remoteChunks; i++) old.push('pt:' + remoteGen + ':' + i);
+    try { await redis(['DEL'].concat(old)); } catch (e) { /* not important */ }
+  }
+  remoteGen = gen; remoteChunks = chunks.length; lastRemote = Date.now();
+}
+
+let saving = false;
+async function save(force) {
+  if (!dirty || saving) return;
+  saving = true;
+  try {
+    try {
+      const tmp = DATA_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(db));
+      fs.renameSync(tmp, DATA_FILE);
+    } catch (e) { console.error('local save failed', e.message); }
+    if (useRemote) {
+      if (remoteReady && (force || Date.now() - lastRemote >= REMOTE_EVERY_MS)) {
+        await saveRemote();
+        dirty = false;
+      }
+    } else dirty = false;
   } catch (e) { console.error('save failed', e.message); }
+  saving = false;
 }
 setInterval(save, 30000).unref();
-process.on('SIGTERM', () => { save(); process.exit(0); });
-process.on('SIGINT', () => { save(); process.exit(0); });
+setInterval(() => { if (useRemote && !remoteReady) loadRemote(); }, 60000).unref();
+async function shutdown() {
+  const t = setTimeout(() => process.exit(0), 8000);   // never hang on exit
+  await save(true);
+  clearTimeout(t);
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 const keyOf = (name, source) => (source === 'BZ' ? 'bz:' : '') + name.toLowerCase();
 
@@ -171,5 +257,8 @@ if (process.env.RENDER_EXTERNAL_URL) {
   }, 10 * 60 * 1000).unref();
 }
 
-load();
-server.listen(PORT, () => console.log('Price Tracker server on port ' + PORT));
+loadLocal();
+loadRemote().finally(() => {
+  console.log('Loaded ' + Object.keys(db).length + ' items');
+  server.listen(PORT, () => console.log('Price Tracker server on port ' + PORT));
+});
