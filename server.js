@@ -406,6 +406,23 @@ const server = http.createServer((req, res) => {
       return send(res, 200, 'Price Tracker server OK - ' + Object.keys(db).length + ' items\n', 'text/plain; charset=utf-8');
     }
   }
+  if (req.method === 'GET' && (url.pathname === '/privacy' || url.pathname === '/terms')) {
+    const isTerms = url.pathname === '/terms';
+    const page = isTerms
+      ? '<h1>Terms of Service</h1>' +
+        '<p>Price Tracker is a free, community-run Skyblock market dashboard provided as is, with no guarantees of accuracy or availability.</p>' +
+        '<p>Prices are submitted by players and may be wrong. Do not rely on them for financial decisions. We may remove data or accounts that abuse the service.</p>'
+      : '<h1>Privacy Policy</h1>' +
+        '<p>Price Tracker is a Skyblock market dashboard. If you sign in with Google, we receive your name, email address and profile picture. They are used only to identify your account and save your watchlist.</p>' +
+        '<p>We do not sell or share your data with anyone, and we do not access any other Google data.</p>' +
+        '<p>Price data uploaded by players is anonymous. We only keep a short hash of the uploader IP address for abuse limits.</p>' +
+        '<p>To have your data deleted, contact: minecraftxdiscordcollective.dev@gmail.com</p>' +
+        '<p>Last updated: November 2026</p>';
+    return send(res, 200, '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>' + (isTerms ? 'Terms of Service' : 'Privacy Policy') + ' - Price Tracker</title></head>' +
+      '<body style="font-family:system-ui,sans-serif;max-width:700px;margin:40px auto;padding:0 16px;line-height:1.5">' +
+      page + '<p><a href="/">Back to Price Tracker</a></p></body></html>', 'text/html; charset=utf-8');
+  }
   if (req.method === 'GET' && url.pathname === '/health') {
     return send(res, 200, 'Price Tracker server OK - ' + Object.keys(db).length + ' items\n', 'text/plain; charset=utf-8');
   }
