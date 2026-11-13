@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Price Tracker Admin</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--tx:#14161a;--mu:#6b7280;--bd:#e3e5ea;--ac:#d98a1a;--bad:#d33;--ok:#1a9d5a}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1114;--card:#181b20;--tx:#eceef2;--mu:#8b93a1;--bd:#2a2f37;--ac:#f0a53a}}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+.w{max-width:1100px;margin:0 auto;padding:16px}h1{font-size:20px;margin:0}
+.bar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}
+.c b{display:block;font-size:22px;margin-top:4px}.c span{color:var(--mu);font-size:12px}
+button,input,select{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:7px 11px}
+button{cursor:pointer}button.p{background:var(--ac);color:#111;border-color:var(--ac);font-weight:600}button.d{color:var(--bad);border-color:var(--bad)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.row input{flex:1;min-width:140px}
+.t{overflow-x:auto;background:var(--card);border:1px solid var(--bd);border-radius:10px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}th{color:var(--mu);font-weight:600;font-size:12px}
+.tag{font-size:11px;padding:2px 6px;border-radius:6px;background:var(--bad);color:#fff}.ok{color:var(--ok)}.bd{color:var(--bad)}
+#login{max-width:320px;margin:15vh auto;text-align:center}#login input{width:100%;margin:12px 0}
+#msg{color:var(--mu);margin:6px 0;min-height:18px}h2{font-size:15px;margin:18px 0 8px}
+</style></head><body>
+<div id="login" class="c"><h1>Admin login</h1><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="p" onclick="login()">Log in</button><div id="lm" class="bd"></div></div>
+
+<div id="app" class="w" style="display:none">
+<div class="bar"><h1>Price Tracker Admin</h1><div><button onclick="load()">Refresh</button> <button onclick="logout()">Log out</button></div></div>
+<div class="g" id="cards"></div>
+<div id="msg"></div>
+<div class="row">
+<button class="p" onclick="act('save','Saved to database')">Save to database now</button>
+<button onclick="act('purge','Removed junk')">Remove junk and bad data</button>
+<button onclick="backup()">Download backup</button>
+<button class="d" onclick="clearAll()">Delete everything</button>
+</div>
+
+<h2>Items</h2>
+<div class="row">
+<input id="q" placeholder="Search item name" oninput="pg=0;items()">
+<select id="src" onchange="pg=0;items()"><option value="">All</option><option value="BZ">Bazaar</option><option value="AH">Auction House</option></select>
+<select id="bad" onchange="pg=0;items()"><option value="">All items</option><option value="1">Suspicious only</option></select>
+<button class="d" onclick="delSel()">Delete selected</button>
+</div>
+<div class="t"><table><thead><tr><th></th><th>Item</th><th>Type</th><th>Price</th><th>Sell</th><th>Margin</th><th>History</th><th>Seen</th><th>Flag</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="row" style="margin-top:10px"><button onclick="pg=Math.max(0,pg-1);items()">Prev</button><button onclick="pg++;items()">Next</button><span id="pi" style="color:var(--mu);align-self:center"></span></div>
+
+<h2>Recent uploads</h2>
+<div class="t"><table><thead><tr><th>Time</th><th>Uploader (hashed)</th><th>Sent</th><th>Accepted</th></tr></thead><tbody id="rec"></tbody></table></div>
+</div>
+
+<script>
+let T=sessionStorage.getItem('pt_admin')||'',pg=0;
+const $=id=>document.getElementById(id);
+const fmt=n=>n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(Math.round(n*10)/10);
+const ago=t=>{if(!t)return'never';const s=(Date.now()-t)/1000;return s<60?Math.round(s)+'s ago':s<3600?Math.round(s/60)+'m ago':s<86400?Math.round(s/3600)+'h ago':Math.round(s/86400)+'d ago'};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,body){
+  const o={headers:{'X-Admin-Token':T}};
+  if(body!==undefined){o.method='POST';o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
+  const r=await fetch('/admin/api/'+p,o);
+  if(r.status===401&&p!=='login'){logout();throw new Error('login')}
+  const j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;
+}
+async function login(){
+  try{const j=await api('login',{password:$('pw').value});T=j.token;sessionStorage.setItem('pt_admin',T);start()}
+  catch(e){$('lm').textContent=e.message}
+}
+function logout(){T='';sessionStorage.removeItem('pt_admin');$('app').style.display='none';$('login').style.display='block'}
+function start(){$('login').style.display='none';$('app').style.display='block';load()}
+async function load(){
+  try{
+    const o=await api('overview'),s=o.storage;
+    const db=!s.remote?'<span class="bd">OFF (data is lost on restart)</span>':s.ready?'<span class="ok">ON</span>':'<span class="bd">not connected</span>';
+    const card=(l,v)=>'<div class="c"><span>'+l+'</span><b>'+v+'</b></div>';
+    $('cards').innerHTML=card('Items',o.total)+card('Bazaar',o.bz)+card('Auction House',o.ah)+card('Suspicious',o.suspicious)+
+      card('Uploaders (24h)',o.uploaders24h)+card('Last upload',ago(o.stats.lastUpload))+card('Uploads accepted',o.stats.accepted)+
+      card('Rejected',o.stats.rejected)+card('Database',db)+card('Last DB save',ago(s.lastSave))+card('Uptime',o.uptimeMin+' min');
+    $('rec').innerHTML=o.recent.map(r=>'<tr><td>'+ago(r.t)+'</td><td>'+r.who+'</td><td>'+r.sent+'</td><td>'+r.ok+'</td></tr>').join('')||'<tr><td colspan=4>No uploads since the server started</td></tr>';
+    items();
+  }catch(e){if(e.message!=='login')$('msg').textContent=e.message}
+}
+async function items(){
+  const p='items?q='+encodeURIComponent($('q').value)+'&source='+$('src').value+'&bad='+$('bad').value+'&page='+pg;
+  try{
+    const j=await api(p);
+    $('rows').innerHTML=j.items.map(i=>'<tr><td><input type="checkbox" value="'+esc(i.key)+'"></td><td>'+esc(i.name)+'</td><td>'+i.source+'</td><td>'+fmt(i.price)+'</td><td>'+(i.sell?fmt(i.sell):'-')+'</td><td>'+(i.margin?i.margin+'%':'-')+'</td><td>'+i.hist+'</td><td>'+ago(i.seen)+'</td><td>'+(i.flag?'<span class="tag">'+i.flag+'</span>':'')+'</td><td><button onclick="edit(\''+esc(i.key).replace(/'/g,"\\'")+'\','+i.price+','+(i.sell||0)+')">Edit</button></td></tr>').join('')||'<tr><td colspan=10>No items</td></tr>';
+    $('pi').textContent=j.total+' items, page '+(pg+1);
+  }catch(e){if(e.message!=='login')$('msg').textContent=e.message}
+}
+async function act(p,ok){try{const j=await api(p,{});$('msg').textContent=ok+(j.removed!==undefined?' ('+j.removed+')':'');load()}catch(e){$('msg').textContent=e.message}}
+async function delSel(){
+  const k=[...document.querySelectorAll('#rows input:checked')].map(x=>x.value);
+  if(!k.length||!confirm('Delete '+k.length+' item(s)?'))return;
+  try{const j=await api('delete',{keys:k});$('msg').textContent='Deleted '+j.removed;load()}catch(e){$('msg').textContent=e.message}
+}
+async function edit(key,price,sell){
+  const p=prompt('New buy price (coins)',price);if(p===null)return;
+  const s=prompt('New sell price (0 = none)',sell);if(s===null)return;
+  try{await api('set',{key,price:Number(p),sell:Number(s)});$('msg').textContent='Updated';items()}catch(e){$('msg').textContent=e.message}
+}
+async function clearAll(){
+  const c=prompt('This deletes ALL items on the server. Type DELETE ALL to confirm');if(c!=='DELETE ALL')return;
+  try{const j=await api('clear',{confirm:c});$('msg').textContent='Deleted '+j.removed+' items';load()}catch(e){$('msg').textContent=e.message}
+}
+async function backup(){
+  try{const r=await fetch('/admin/api/export',{headers:{'X-Admin-Token':T}});if(!r.ok)throw new Error('HTTP '+r.status);
+  const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='pricetracker-backup.json';a.click()}catch(e){$('msg').textContent=e.message}
+}
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+if(T)start();
+</script></body></html>
