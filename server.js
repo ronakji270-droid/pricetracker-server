@@ -11,7 +11,11 @@
  */
 const http = require('http');
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
+
+process.on('uncaughtException', e => console.error('UNCAUGHT ERROR (server kept running):', e && e.stack || e));
+process.on('unhandledRejection', e => console.error('UNHANDLED REJECTION (server kept running):', e && e.stack || e));
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
@@ -41,12 +45,17 @@ let remoteGen = 0, remoteChunks = 0, lastRemote = 0;
 if (useRemote) console.log('Upstash Redis backup ON');
 
 async function redis(cmd) {
+  if (typeof fetch !== 'function') throw new Error('this Node version has no fetch - set Node 18 or newer in Render');
   const r = await fetch(REDIS_URL, {
+    signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(15000) : undefined,
     method: 'POST',
     headers: { Authorization: 'Bearer ' + REDIS_TOKEN, 'Content-Type': 'application/json' },
     body: JSON.stringify(cmd)
   });
-  if (!r.ok) throw new Error('Redis HTTP ' + r.status);
+  if (!r.ok) {
+    let t = ''; try { t = (await r.text()).slice(0, 200); } catch (e) { /* ignore */ }
+    throw new Error('Redis HTTP ' + r.status + ' ' + t);
+  }
   const j = await r.json();
   if (j.error) throw new Error(j.error);
   return j.result;
@@ -101,6 +110,7 @@ async function saveRemote() {
     try { await redis(['DEL'].concat(old)); } catch (e) { /* not important */ }
   }
   remoteGen = gen; remoteChunks = chunks.length; lastRemote = Date.now();
+  console.log('Saved ' + keys.length + ' items to Upstash (' + chunks.length + ' chunks)');
 }
 
 let saving = false;
@@ -119,7 +129,10 @@ async function save(force) {
         dirty = false;
       }
     } else dirty = false;
-  } catch (e) { console.error('save failed', e.message); }
+  } catch (e) {
+    console.error('Upstash SAVE FAILED (nothing was stored): ' + e.message);
+    lastRemote = Date.now();          // wait 2 minutes before trying again (saves your free command limit)
+  }
   saving = false;
 }
 setInterval(save, 30000).unref();
@@ -146,10 +159,24 @@ function limited(ip) {
 setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now > v.reset) hits.delete(k); }, 60000).unref();
 
 // ---------- logic ----------
+const UI_RE = /(% of spread|best offer|best order|same as best|top order|^custom |sell inventory|fill my inventory|buy only one|buy instantly|sell instantly|^create |^view |^click |^go back|^manage | setup$)/i;
+const stats = { posts: 0, accepted: 0, rejected: 0, lastUpload: 0, lastError: '' };
+const recent = [];                 // last uploads for the admin panel
+const uploaders = new Map();       // hashed ip -> last seen (unique uploaders)
+function purgeBad() {              // remove menu buttons and impossible data
+  let n = 0;
+  for (const k in db) {
+    const it = db[k];
+    if (UI_RE.test(it.name) || !(it.lowestBin > 0) || (it.source === 'BZ' && it.sellPrice > 0 && (it.lowestBin / it.sellPrice - 1) > 3)) { delete db[k]; n++; }
+  }
+  if (n) dirty = true;
+  return n;
+}
 function accept(e, now) {
   if (!e || typeof e !== 'object') return false;
   let name = typeof e.name === 'string' ? e.name.trim() : '';
   if (name.length < 2 || name.length > 80 || /[\u0000-\u001f<>]/.test(name)) return false;
+  if (UI_RE.test(name)) return false;
   const source = e.source === 'BZ' ? 'BZ' : 'AH';
   const price = Number(e.price), sell = Number(e.sell || 0);
   if (!isFinite(price) || price <= 0 || price > MAX_PRICE) return false;
@@ -182,6 +209,82 @@ function send(res, code, body, type) {
   const data = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(code, { 'Content-Type': type || 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(data);
+}
+
+// ---------- admin panel (needs the env var ADMIN_PASSWORD) ----------
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const sessions = new Map();          // token -> expiry
+const fails = new Map();             // ip -> {n, reset}
+const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+const bootTime = Date.now();
+
+function readJson(req, cb) {
+  let size = 0; const chunks = [];
+  req.on('data', c => { size += c.length; if (size > MAX_BODY) req.destroy(); else chunks.push(c); });
+  req.on('end', () => { let o = {}; try { o = JSON.parse(Buffer.concat(chunks).toString('utf8')) || {}; } catch (e) { /* empty */ } cb(o); });
+}
+
+function adminApi(req, res, url, ip) {
+  if (!ADMIN_PASSWORD) return send(res, 503, { error: 'Admin is off. Set ADMIN_PASSWORD in Render.' });
+  const route = url.pathname.slice('/admin/api/'.length);
+  if (route === 'login' && req.method === 'POST') {
+    return readJson(req, b => {
+      const now = Date.now(); let f = fails.get(ip);
+      if (!f || now > f.reset) { f = { n: 0, reset: now + 600000 }; fails.set(ip, f); }
+      if (f.n >= 5) return send(res, 429, { error: 'Too many tries. Wait 10 minutes.' });
+      if (!same(b.password || '', ADMIN_PASSWORD)) { f.n++; return send(res, 401, { error: 'Wrong password' }); }
+      const token = crypto.randomBytes(24).toString('hex');
+      sessions.set(token, now + 12 * 3600000);
+      send(res, 200, { token });
+    });
+  }
+  const tok = req.headers['x-admin-token'];
+  if (!tok || !sessions.has(tok) || sessions.get(tok) < Date.now()) return send(res, 401, { error: 'login needed' });
+
+  if (route === 'overview') {
+    let ah = 0, bz = 0, bad = 0;
+    for (const k in db) { const it = db[k]; if (it.source === 'BZ') bz++; else ah++; if (UI_RE.test(it.name) || (it.source === 'BZ' && it.sellPrice > 0 && it.lowestBin / it.sellPrice > 4)) bad++; }
+    const day = Date.now() - 86400000; let u = 0; for (const v of uploaders.values()) if (v > day) u++;
+    return send(res, 200, { total: ah + bz, ah, bz, suspicious: bad, uploaders24h: u, uptimeMin: Math.round((Date.now() - bootTime) / 60000),
+      stats, recent, storage: { remote: useRemote, ready: useRemote ? remoteReady : null, lastSave: lastRemote, dirty } });
+  }
+  if (route === 'items') {
+    const q = (url.searchParams.get('q') || '').toLowerCase(), src = url.searchParams.get('source') || '';
+    const only = url.searchParams.get('bad') === '1', page = Math.max(0, Number(url.searchParams.get('page')) || 0);
+    let list = [];
+    for (const k in db) {
+      const it = db[k];
+      if (src && it.source !== src) continue;
+      if (q && !it.name.toLowerCase().includes(q)) continue;
+      const margin = it.source === 'BZ' && it.sellPrice > 0 ? (it.lowestBin / it.sellPrice - 1) * 100 : 0;
+      const flag = UI_RE.test(it.name) ? 'menu button' : margin > 100 ? 'huge margin' : '';
+      if (only && !flag) continue;
+      list.push({ key: k, name: it.name, source: it.source, price: it.lowestBin, sell: it.sellPrice, margin: Math.round(margin), flag, seen: it.lastSeen, hist: it.history.length });
+    }
+    list.sort((a, b) => b.seen - a.seen);
+    return send(res, 200, { total: list.length, items: list.slice(page * 50, page * 50 + 50) });
+  }
+  if (route === 'export') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="pricetracker-backup.json"' });
+    return res.end(JSON.stringify(db));
+  }
+  if (req.method !== 'POST') return send(res, 405, { error: 'POST only' });
+  return readJson(req, b => {
+    if (route === 'delete') { let n = 0; for (const k of (Array.isArray(b.keys) ? b.keys : [])) if (db[k]) { delete db[k]; n++; } if (n) dirty = true; return send(res, 200, { ok: true, removed: n }); }
+    if (route === 'purge') return send(res, 200, { ok: true, removed: purgeBad() });
+    if (route === 'set') {
+      const it = db[b.key], p = Number(b.price), sl = Number(b.sell || 0);
+      if (!it || !(p > 0) || p > MAX_PRICE) return send(res, 400, { error: 'bad value' });
+      it.lowestBin = p; if (sl >= 0 && sl <= MAX_PRICE) it.sellPrice = sl; it.lastSeen = Date.now(); dirty = true;
+      return send(res, 200, { ok: true });
+    }
+    if (route === 'save') { dirty = true; return save(true).then(() => send(res, 200, { ok: true })); }
+    if (route === 'clear') {
+      if (b.confirm !== 'DELETE ALL') return send(res, 400, { error: 'type DELETE ALL' });
+      const n = Object.keys(db).length; db = {}; dirty = true; return send(res, 200, { ok: true, removed: n });
+    }
+    send(res, 404, { error: 'not found' });
+  });
 }
 
 const server = http.createServer((req, res) => {
@@ -240,12 +343,23 @@ const server = http.createServer((req, res) => {
       if (!Array.isArray(arr)) return send(res, 400, { error: 'expected array' });
       const now = Date.now();
       let ok = 0;
+      const tot = Math.min(arr.length, MAX_ITEMS_PER_POST);
       for (const e of arr.slice(0, MAX_ITEMS_PER_POST)) if (accept(e, now)) ok++;
       if (ok) dirty = true;
+      stats.posts++; stats.accepted += ok; stats.rejected += tot - ok; if (ok) stats.lastUpload = now;
+      const who = crypto.createHash('sha256').update(ip).digest('hex').slice(0, 8);
+      uploaders.set(who, now);
+      recent.unshift({ t: now, who, sent: tot, ok }); if (recent.length > 40) recent.pop();
       send(res, 200, { ok: true, accepted: ok });
     });
     return;
   }
+
+  if (url.pathname === '/admin' && req.method === 'GET') {
+    try { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(fs.readFileSync(path.join(__dirname, 'admin.html'))); }
+    catch (e) { return send(res, 404, 'admin.html missing', 'text/plain'); }
+  }
+  if (url.pathname.startsWith('/admin/api/')) return adminApi(req, res, url, ip);
 
   send(res, 404, { error: 'not found' });
 });
@@ -258,7 +372,8 @@ if (process.env.RENDER_EXTERNAL_URL) {
 }
 
 loadLocal();
+server.listen(PORT, () => console.log('Price Tracker server on port ' + PORT));   // port opens at once so Render sees the service as healthy
 loadRemote().finally(() => {
+  const cleaned = purgeBad(); if (cleaned) console.log('Removed ' + cleaned + ' menu-button / bad items');
   console.log('Loaded ' + Object.keys(db).length + ' items');
-  server.listen(PORT, () => console.log('Price Tracker server on port ' + PORT));
 });
