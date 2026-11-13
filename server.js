@@ -167,7 +167,7 @@ function purgeBad() {              // remove menu buttons and impossible data
   let n = 0;
   for (const k in db) {
     const it = db[k];
-    if (UI_RE.test(it.name) || !(it.lowestBin > 0) || (it.source === 'BZ' && it.sellPrice > 0 && (it.lowestBin / it.sellPrice - 1) > 3)) { delete db[k]; n++; }
+    if (UI_RE.test(it.name) || !(it.lowestBin > 0) || (it.source === 'BZ' && it.sellPrice > 0 && ((it.lowestBin / it.sellPrice - 1) > 0.5 || it.sellPrice < 10 || it.lowestBin < 10))) { delete db[k]; n++; }
   }
   if (n) dirty = true;
   return n;
@@ -181,13 +181,14 @@ function accept(e, now) {
   const price = Number(e.price), sell = Number(e.sell || 0);
   if (!isFinite(price) || price <= 0 || price > MAX_PRICE) return false;
   const sellOk = isFinite(sell) && sell > 0 && sell <= MAX_PRICE;
+  const high = Number(e.high || 0);
   const category = CATEGORIES.has(e.category) ? e.category : 'Other';
 
   const key = keyOf(name, source);
   let it = db[key];
   if (!it) {
     if (Object.keys(db).length >= MAX_DB_ITEMS) return false;
-    it = db[key] = { name, source, category: 'Other', lowestBin: 0, sellPrice: 0, avgPrice: 0, history: [], lastSeen: 0 };
+    it = db[key] = { name, source, category: 'Other', lowestBin: 0, highestBin: 0, sellPrice: 0, avgPrice: 0, history: [], lastSeen: 0 };
   }
   // a player's own price history (sent with the one-time upload) fills the graphs / risers / fallers at once
   if (Array.isArray(e.history) && e.history.length > it.history.length) {
@@ -197,6 +198,7 @@ function accept(e, now) {
   if (it.history[it.history.length - 1] !== price) it.history.push(price);
   while (it.history.length > MAX_HISTORY) it.history.shift();
   it.lowestBin = price;
+  if (source === 'AH') it.highestBin = (isFinite(high) && high > price && high <= MAX_PRICE) ? high : (it.highestBin > price ? it.highestBin : 0);
   if (sellOk) it.sellPrice = sell;
   it.avgPrice = it.history.reduce((a, b) => a + b, 0) / it.history.length;
   if (category !== 'Other' || !it.category) it.category = category;
@@ -484,7 +486,7 @@ const server = http.createServer((req, res) => {
     for (const k in db) {
       const it = db[k];
       if (it.lastSeen > since) {
-        items.push({ name: it.name, source: it.source, category: it.category, lowestBin: it.lowestBin,
+        items.push({ name: it.name, source: it.source, category: it.category, lowestBin: it.lowestBin, highestBin: it.highestBin || 0,
                      sellPrice: it.sellPrice, avgPrice: it.avgPrice, lastSeen: it.lastSeen });
       }
     }
