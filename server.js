@@ -406,6 +406,10 @@ const server = http.createServer((req, res) => {
       return send(res, 200, 'Price Tracker server OK - ' + Object.keys(db).length + ' items\n', 'text/plain; charset=utf-8');
     }
   }
+  // Google Search Console ownership check (keep this route, removing it un-verifies the site)
+  if (req.method === 'GET' && url.pathname === '/googlee5140769c53d1819.html') {
+    return send(res, 200, 'google-site-verification: googlee5140769c53d1819.html', 'text/html; charset=utf-8');
+  }
   if (req.method === 'GET' && (url.pathname === '/privacy' || url.pathname === '/terms')) {
     const isTerms = url.pathname === '/terms';
     const page = isTerms
