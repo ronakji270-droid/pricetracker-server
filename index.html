@@ -178,6 +178,7 @@
       <button class="icon-btn menu" id="menuBtn" aria-label="Menu"></button>
       <div class="gsearch" id="gs"><input id="gsearch" placeholder="Search items…   press / to focus" autocomplete="off"></div>
       <div class="pill" id="statusPill"><i class="dot" id="dot"></i><span class="t" id="statusText">Connecting…</span></div>
+      <div id="userBox" style="display:flex;align-items:center;gap:8px"></div>
       <button class="icon-btn" id="themeBtn" aria-label="Toggle theme"></button>
     </header>
     <main id="view"></main>
@@ -274,7 +275,15 @@
   // On the public website there is no mod, so watchlist + settings are kept in this browser.
   const REMOTE = !/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const LS = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-  function localPost(path, b) {
+  let TOKEN = localStorage.getItem('pt_token') || '', ME = null;   // signed-in Google account (website only)
+  async function localPost(path, b) {
+    if (TOKEN && path === '/api/watch') {
+      try {
+        const r = await fetch('/api/me/watch', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, body: JSON.stringify(b) });
+        if (r.status === 401) { signOut(); return { ok: false }; }
+        const j = await r.json(); if (j.watch && ME) ME.watch = j.watch; return j;
+      } catch (e) { return { ok: false }; }
+    }
     if (path === '/api/watch') {
       const w = LS.get('pt_watch', {}); const c = w[b.key] || { watched: false, above: 0, below: 0 };
       if (b.watched !== undefined) { c.watched = !!b.watched; if (!c.watched) { c.above = 0; c.below = 0; } }
@@ -288,7 +297,7 @@
     return { ok: true, removed: 0 };
   }
   function applyLocal(items, st) {
-    const w = LS.get('pt_watch', {}); let n = 0;
+    const w = (TOKEN && ME) ? ME.watch : LS.get('pt_watch', {}); let n = 0;
     items.forEach(i => { const c = w[keyOf(i)]; i.watched = !!c; i.alertAbove = c ? c.above : 0; i.alertBelow = c ? c.below : 0; if (c) n++; });
     st.watched = n; st.settings = Object.assign({}, st.settings, LS.get('pt_settings', {}));
   }
@@ -788,6 +797,41 @@
   route();
   refresh();
   setInterval(refresh, 3000);
+
+  // ---- Google sign-in (website only): each account keeps its own watchlist + alerts, prices stay shared ----
+  function drawUser() {
+    const b = document.getElementById('userBox'); if (!b) return;
+    if (ME) {
+      b.innerHTML = '<span class="pill" title="' + ME.email + '"><span class="t">' + (ME.name || ME.email).split(' ')[0] + '</span></span>' +
+        (ME.admin ? '<a href="/admin" class="pill"><span class="t">Admin</span></a>' : '') + '<button class="pill" id="soBtn"><span class="t">Sign out</span></button>';
+      document.getElementById('soBtn').onclick = signOut;
+    } else b.innerHTML = '<div id="gBtn"></div>';
+  }
+  function signOut() { TOKEN = ''; ME = null; localStorage.removeItem('pt_token'); drawUser(); startGoogle(); refresh(); }
+  async function onGoogle(resp) {
+    try {
+      const r = await fetch('/api/login/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: resp.credential, merge: LS.get('pt_watch', {}) }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error);
+      TOKEN = j.token; ME = j.user; localStorage.setItem('pt_token', TOKEN); drawUser(); refresh();
+    } catch (e) { alert(e.message); }
+  }
+  function startGoogle() {
+    if (ME || !window.google || !window.__gid) return;
+    google.accounts.id.initialize({ client_id: window.__gid, callback: onGoogle });
+    const el = document.getElementById('gBtn'); if (el) google.accounts.id.renderButton(el, { theme: 'outline', size: 'medium', text: 'signin_with' });
+  }
+  async function initAuth() {
+    if (!REMOTE) return;
+    try {
+      const c = await (await fetch('/api/config')).json(); if (!c.enabled) return;
+      window.__gid = c.googleClientId;
+      if (TOKEN) { const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + TOKEN } }); if (r.ok) ME = await r.json(); else { TOKEN = ''; localStorage.removeItem('pt_token'); } }
+      drawUser();
+      if (!ME) { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.onload = startGoogle; document.head.appendChild(s); }
+      else refresh();
+    } catch (e) { /* sign-in is optional */ }
+  }
+  initAuth();
 </script>
 </body>
 </html>
