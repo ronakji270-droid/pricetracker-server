@@ -48,7 +48,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;text-align:left
 </div>
 
 <script>
-let T=sessionStorage.getItem('pt_admin')||'',pg=0;
+let T=sessionStorage.getItem('pt_admin')||localStorage.getItem('pt_token')||'',pg=0;
 const $=id=>document.getElementById(id);
 const fmt=n=>n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(Math.round(n*10)/10);
 const ago=t=>{if(!t)return'never';const s=(Date.now()-t)/1000;return s<60?Math.round(s)+'s ago':s<3600?Math.round(s/60)+'m ago':s<86400?Math.round(s/3600)+'h ago':Math.round(s/86400)+'d ago'};
