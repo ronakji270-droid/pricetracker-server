@@ -225,9 +225,10 @@ function readJson(req, cb) {
 }
 
 function adminApi(req, res, url, ip) {
-  if (!ADMIN_PASSWORD) return send(res, 503, { error: 'Admin is off. Set ADMIN_PASSWORD in Render.' });
+  if (!ADMIN_PASSWORD && !ADMIN_EMAIL) return send(res, 503, { error: 'Admin is off. Set ADMIN_PASSWORD (or ADMIN_EMAIL) in Render.' });
   const route = url.pathname.slice('/admin/api/'.length);
   if (route === 'login' && req.method === 'POST') {
+    if (!ADMIN_PASSWORD) return send(res, 503, { error: 'Password login is off. Sign in with Google.' });
     return readJson(req, b => {
       const now = Date.now(); let f = fails.get(ip);
       if (!f || now > f.reset) { f = { n: 0, reset: now + 600000 }; fails.set(ip, f); }
@@ -239,7 +240,9 @@ function adminApi(req, res, url, ip) {
     });
   }
   const tok = req.headers['x-admin-token'];
-  if (!tok || !sessions.has(tok) || sessions.get(tok) < Date.now()) return send(res, 401, { error: 'login needed' });
+  const gs = readSession(tok);
+  const isGoogleAdmin = !!(gs && ADMIN_EMAIL && gs.email === ADMIN_EMAIL);
+  if (!isGoogleAdmin && (!tok || !sessions.has(tok) || sessions.get(tok) < Date.now())) return send(res, 401, { error: 'login needed' });
 
   if (route === 'overview') {
     let ah = 0, bz = 0, bad = 0;
@@ -285,6 +288,106 @@ function adminApi(req, res, url, ip) {
     }
     send(res, 404, { error: 'not found' });
   });
+}
+
+// ---------- Google sign-in + per-user watchlist (needs GOOGLE_CLIENT_ID and SESSION_SECRET) ----------
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const CERTS_URL = process.env.GOOGLE_CERTS_URL || 'https://www.googleapis.com/oauth2/v3/certs';
+const USERS_FILE = DATA_FILE + '.users';
+let certs = { at: 0, keys: [] }, usersCache = null;
+
+async function googleKeys() {
+  if (certs.keys.length && Date.now() - certs.at < 3600000) return certs.keys;
+  const j = await (await fetch(CERTS_URL)).json();
+  certs = { at: Date.now(), keys: j.keys || [] };
+  return certs.keys;
+}
+async function verifyGoogle(idToken) {
+  const [h, p, sig] = String(idToken || '').split('.');
+  if (!sig) throw new Error('bad token');
+  const head = JSON.parse(Buffer.from(h, 'base64url')), pay = JSON.parse(Buffer.from(p, 'base64url'));
+  const jwk = (await googleKeys()).find(k => k.kid === head.kid);
+  if (!jwk || head.alg !== 'RS256') throw new Error('unknown key');
+  const ok = crypto.verify('RSA-SHA256', Buffer.from(h + '.' + p), crypto.createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(sig, 'base64url'));
+  if (!ok) throw new Error('bad signature');
+  if (pay.iss !== 'accounts.google.com' && pay.iss !== 'https://accounts.google.com') throw new Error('bad issuer');
+  if (pay.aud !== GOOGLE_CLIENT_ID) throw new Error('wrong client id');
+  if (!(pay.exp * 1000 > Date.now())) throw new Error('token expired');
+  if (!pay.email_verified || !pay.sub) throw new Error('email not verified');
+  return pay;
+}
+const b64u = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+const mac = t => crypto.createHmac('sha256', SESSION_SECRET).update(t).digest('base64url');
+function signSession(o) { const t = b64u(o); return t + '.' + mac(t); }
+function readSession(tok) {
+  if (!SESSION_SECRET || !tok) return null;
+  const [t, m] = String(tok).split('.');
+  if (!m || !same(m, mac(t))) return null;
+  try { const o = JSON.parse(Buffer.from(t, 'base64url')); return o.exp > Date.now() ? o : null; } catch (e) { return null; }
+}
+function usersLocal() {
+  if (!usersCache) { try { usersCache = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')) || {}; } catch (e) { usersCache = {}; } }
+  return usersCache;
+}
+async function getUser(sub) {
+  const u = usersLocal();
+  if (u[sub]) return u[sub];
+  if (useRemote) { try { const t = await redis(['GET', 'pt:u:' + sub]); if (t) { u[sub] = JSON.parse(t); return u[sub]; } } catch (e) { /* ignore */ } }
+  return null;
+}
+async function putUser(sub, rec) {
+  usersLocal()[sub] = rec;
+  try { fs.writeFileSync(USERS_FILE, JSON.stringify(usersCache)); } catch (e) { /* ignore */ }
+  if (useRemote) { try { await redis(['SET', 'pt:u:' + sub, JSON.stringify(rec)]); } catch (e) { console.error('user save failed: ' + e.message); } }
+}
+function changeWatch(w, b) {            // one person's own watchlist: { "bz:coal": {above, below} }
+  const key = typeof b.key === 'string' ? b.key.slice(0, 100) : '';
+  if (!key) return;
+  const n = v => { v = Number(v); return v > 0 && v <= MAX_PRICE ? v : 0; };
+  const c = w[key] || { above: 0, below: 0 }; let on = !!w[key];
+  if (b.watched !== undefined) { on = !!b.watched; if (!on) { c.above = 0; c.below = 0; } }
+  if (b.above !== undefined) c.above = n(b.above);
+  if (b.below !== undefined) c.below = n(b.below);
+  if ((b.above !== undefined || b.below !== undefined) && (c.above > 0 || c.below > 0) && b.watched !== false) on = true;
+  if (on && (w[key] || Object.keys(w).length < 300)) w[key] = c; else delete w[key];
+}
+const profile = (rec, email) => ({ email: rec.email, name: rec.name || '', picture: rec.picture || '', watch: rec.watch, admin: !!ADMIN_EMAIL && email === ADMIN_EMAIL });
+
+function userApi(req, res, url) {
+  const on = !!(GOOGLE_CLIENT_ID && SESSION_SECRET);
+  if (url.pathname === '/api/config') return send(res, 200, { enabled: on, googleClientId: on ? GOOGLE_CLIENT_ID : '' });
+  if (!on) return send(res, 503, { error: 'Sign-in is off. Set GOOGLE_CLIENT_ID and SESSION_SECRET in Render.' });
+  if (url.pathname === '/api/login/google' && req.method === 'POST') {
+    return readJson(req, async b => {
+      try {
+        const g = await verifyGoogle(b.credential);
+        const email = String(g.email).toLowerCase();
+        const rec = (await getUser(g.sub)) || { watch: {} };
+        rec.email = email; rec.name = g.name || ''; rec.picture = g.picture || '';
+        if (b.merge && typeof b.merge === 'object') {          // watchlist made before login (kept in the browser)
+          for (const k of Object.keys(b.merge).slice(0, 300)) if (!rec.watch[k]) changeWatch(rec.watch, { key: k, watched: true, above: b.merge[k].above, below: b.merge[k].below });
+        }
+        await putUser(g.sub, rec);
+        send(res, 200, { token: signSession({ sub: g.sub, email, exp: Date.now() + 30 * 86400000 }), user: profile(rec, email) });
+      } catch (e) { send(res, 401, { error: 'Google sign-in failed: ' + e.message }); }
+    });
+  }
+  const sess = readSession((req.headers.authorization || '').replace(/^Bearer /, ''));
+  if (!sess) return send(res, 401, { error: 'sign in again' });
+  if (url.pathname === '/api/me' && req.method === 'GET') {
+    return getUser(sess.sub).then(rec => rec ? send(res, 200, profile(rec, sess.email)) : send(res, 401, { error: 'unknown user' }));
+  }
+  if (url.pathname === '/api/me/watch' && req.method === 'POST') {
+    return readJson(req, async b => {
+      const rec = await getUser(sess.sub);
+      if (!rec) return send(res, 401, { error: 'unknown user' });
+      changeWatch(rec.watch, b); await putUser(sess.sub, rec);
+      send(res, 200, { ok: true, watch: rec.watch });
+    });
+  }
+  send(res, 404, { error: 'not found' });
 }
 
 const server = http.createServer((req, res) => {
@@ -355,6 +458,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === '/api/config' || url.pathname === '/api/login/google' || url.pathname.startsWith('/api/me')) return userApi(req, res, url);
   if (url.pathname === '/admin' && req.method === 'GET') {
     try { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(fs.readFileSync(path.join(__dirname, 'admin.html'))); }
     catch (e) { return send(res, 404, 'admin.html missing', 'text/plain'); }
