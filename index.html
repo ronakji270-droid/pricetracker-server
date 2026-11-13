@@ -237,12 +237,13 @@
   }
   function trendOf(h) {           // same maths as the in-game GUI
     const n = h.length;
-    if (n < 2) return 0;
-    const r = n >= 6 ? 3 : 1, from = Math.max(0, n - r - 10);
+    if (n < 6) return 0;                                   // not enough scans for a real trend
+    const r = 3, from = Math.max(0, n - r - 10);
     const recent = median(h.slice(n - r)), base = median(h.slice(from, n - r));
-    return base > 0 ? (recent - base) / base * 100 : 0;
+    if (base < 50) return 0;                               // tiny prices give silly percentages
+    return Math.max(-50, Math.min(50, (recent - base) / base * 100));
   }
-  const marginOf = i => { if (!(i.source === 'BZ' && i.sellPrice > 0 && i.lowestBin > 0)) return 0; const m = (i.lowestBin * 0.9875 - i.sellPrice) / i.sellPrice * 100; return m > 300 ? 0 : m; };  // >300% = bad data
+  const marginOf = i => { if (i.source !== 'BZ' || i.sellPrice < 10 || i.lowestBin < 10) return 0; const m = (i.lowestBin * 0.9875 - i.sellPrice) / i.sellPrice * 100; return (m > 50 || m < 0) ? 0 : m; };  // real flips are small, bigger = bad data
   const keyOf = i => (i.source === 'BZ' ? 'bz:' : '') + i.name.toLowerCase();
   function parseCoins(s) {
     s = String(s || '').trim().toLowerCase().replace(/[, ]/g, '');
@@ -318,8 +319,8 @@
     list.forEach(i => {
       i.history = i.history || [];
       i._key = keyOf(i); i._cat = i.category || 'Other';
-      i._trend = trendOf(i.history); i._margin = marginOf(i);
-      i.lowestBin = i.lowestBin || 0; i.sellPrice = i.sellPrice || 0; i.avgPrice = i.avgPrice || 0;
+      i._trend = i.source === 'BZ' ? trendOf(i.history) : 0; i._margin = marginOf(i);
+      i.highestBin = i.highestBin || 0; i.lowestBin = i.lowestBin || 0; i.sellPrice = i.sellPrice || 0; i.avgPrice = i.avgPrice || 0;
     });
   }
   const byKey = k => S.items.find(i => i._key === k);
@@ -333,7 +334,7 @@
             : `<div class="empty">${empty}</div>`;
     return `<div class="card"><div class="card-h"><h2>${ic(icon, 17)} ${title}</h2></div><div class="list">${rows}</div></div>`;
   }
-  const movers = () => S.items.filter(i => i.history.length >= 3 && Math.abs(i._trend) >= 0.1);
+  const movers = () => S.items.filter(i => i.source === 'BZ' && i.history.length >= 6 && Math.abs(i._trend) >= 0.1);
   const flips = () => S.items.filter(i => i._margin > 0).sort((a, b) => b._margin - a._margin);
 
   function itemRow(i) {
@@ -343,7 +344,7 @@
     <td class="name">${esc(i.name)}<small>${esc(i._cat)}</small></td>
     <td>${marketTag(i)}</td>
     <td class="num gold" title="${full(i.lowestBin)}">${fmt(i.lowestBin)}</td>
-    <td class="num">${bz && i.sellPrice > 0 ? `<span class="blue" title="${full(i.sellPrice)}">${fmt(i.sellPrice)}</span>` : '<span class="faint">—</span>'}</td>
+    <td class="num">${bz && i.sellPrice > 0 ? `<span class="blue" title="${full(i.sellPrice)}">${fmt(i.sellPrice)}</span>` : (!bz && i.highestBin > i.lowestBin ? `<span class="gold" title="${full(i.highestBin)}">${fmt(i.highestBin)}</span>` : '<span class="faint">—</span>')}</td>
     <td class="num muted">${fmt(i.avgPrice)}</td>
     <td>${spark(i.history)} ${chg(i._trend)}</td>
     <td class="num muted">${ago(i.lastSeen)}</td></tr>`;
@@ -355,7 +356,7 @@
   VIEWS.dashboard = {
     title: 'Dashboard',
     mount(el) {
-      el.innerHTML = `<div class="page-head"><div><h1>Dashboard</h1><p class="sub">Live overview of everything your game has scanned.</p></div></div>
+      el.innerHTML = `<div class="page-head"><div><h1>Dashboard</h1><p class="sub">Live Skyblock prices scanned by the community.</p></div></div>
       <div class="grid stats" id="dStats"></div>
       <div class="grid cols2" id="dLists"></div>`;
     },
@@ -376,8 +377,8 @@
       const fl = flips().slice(0, 6);
       const rec = S.items.slice().sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0)).slice(0, 6);
       $('#dLists').innerHTML =
-              listCard('Top risers', 'trend', rise, i => chg(i._trend), 'Needs a few scans over time.') +
-              listCard('Top fallers', 'trend', fall, i => chg(i._trend), 'No falling prices yet.') +
+              listCard('Top risers · Bazaar', 'trend', rise, i => chg(i._trend), 'Needs 6+ scans of a Bazaar item.') +
+              listCard('Top fallers · Bazaar', 'trend', fall, i => chg(i._trend), 'No falling prices yet.') +
               listCard('Best Bazaar flips', 'flips', fl, i => `<span class="chg up">+${i._margin.toFixed(1)}%</span>`, 'Browse the Bazaar to find flips.') +
               listCard('Recently updated', 'clock', rec, i => `<span class="faint">${ago(i.lastSeen)}</span>`, 'Open the Auction House or Bazaar in game.');
     }
@@ -386,8 +387,8 @@
   const COLS = [
     { id: 'name',  label: 'Item',    sort: (a, b) => a.name.localeCompare(b.name) },
     { id: 'src',   label: 'Market',  sort: (a, b) => a.source.localeCompare(b.source) },
-    { id: 'price', label: 'Price',   num: 1, sort: (a, b) => a.lowestBin - b.lowestBin },
-    { id: 'sell',  label: 'Sell',    num: 1, sort: (a, b) => a.sellPrice - b.sellPrice },
+    { id: 'price', label: 'Low / Buy',   num: 1, sort: (a, b) => a.lowestBin - b.lowestBin },
+    { id: 'sell',  label: 'High / Sell', num: 1, sort: (a, b) => Math.max(a.sellPrice, a.highestBin) - Math.max(b.sellPrice, b.highestBin) },
     { id: 'avg',   label: 'Average', num: 1, sort: (a, b) => a.avgPrice - b.avgPrice },
     { id: 'trend', label: 'Trend',   sort: (a, b) => a._trend - b._trend },
     { id: 'seen',  label: 'Updated', num: 1, sort: (a, b) => (a.lastSeen || 0) - (b.lastSeen || 0) }
@@ -648,11 +649,11 @@
   function refreshDrawer() {
     const i = byKey(S.sel); if (!i) return;
     const h = i.history, bz = i.source === 'BZ';
-    $('#dPrice').innerHTML = `<span class="gold" title="${full(i.lowestBin)}">${fmt(i.lowestBin)}</span> ${chg(i._trend)}`;
+    $('#dPrice').innerHTML = `<span class="gold" title="${full(i.lowestBin)}">${fmt(i.lowestBin)}</span> ${bz ? chg(i._trend) : ''}`;
     $('#dStar').style.color = i.watched ? 'var(--accent)' : '';
     $('#dStar').innerHTML = ic('star', 17).replace('fill="none"', i.watched ? 'fill="currentColor"' : 'fill="none"');
-    const hi = h.length ? Math.max(...h) : 0, lo = h.length ? Math.min(...h) : 0;
-    const cells = [['Average', fmt(i.avgPrice)], ['Samples', h.length], ['Highest', fmt(hi)], ['Lowest', fmt(lo)]];
+    const hi = Math.max(i.highestBin || 0, h.length ? Math.max(...h) : 0), lo = h.length ? Math.min(...h) : 0;
+    const cells = [['Average', fmt(i.avgPrice)], ['Samples', h.length], [bz ? 'Highest seen' : 'Highest BIN', fmt(hi)], [bz ? 'Lowest seen' : 'Lowest BIN', fmt(lo)]];
     if (bz) {
       const profit = i.lowestBin * 0.9875 - i.sellPrice;
       cells.unshift(['Sell price', `<span class="blue">${fmt(i.sellPrice)}</span>`], ['Flip margin', i.sellPrice > 0 ? `<span class="${profit >= 0 ? 'up' : 'down'}">${i._margin.toFixed(1)}%</span>` : '—']);
