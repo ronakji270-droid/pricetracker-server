@@ -159,7 +159,7 @@ function limited(ip) {
 setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now > v.reset) hits.delete(k); }, 60000).unref();
 
 // ---------- logic ----------
-const UI_RE = /(% of spread|best offer|best order|same as best|top order|^custom |sell inventory|fill my inventory|buy only one|buy instantly|sell instantly|^create |^view |^click |^go back|^manage | setup$)/i;
+const UI_RE = /(spread|best offer|best order|same as best|top order|^custom |sell inventory|fill my inventory|buy only one|buy instantly|sell instantly|^create |^view |^click |^go back|^manage | setup$)/i;
 const stats = { posts: 0, accepted: 0, rejected: 0, lastUpload: 0, lastError: '' };
 const recent = [];                 // last uploads for the admin panel
 const uploaders = new Map();       // hashed ip -> last seen (unique uploaders)
@@ -241,7 +241,7 @@ function adminApi(req, res, url, ip) {
   }
   const tok = req.headers['x-admin-token'];
   const gs = readSession(tok);
-  const isGoogleAdmin = !!(gs && ADMIN_EMAIL && gs.email === ADMIN_EMAIL);
+  const isGoogleAdmin = !!(gs && !gs.mod && ADMIN_EMAIL && gs.email === ADMIN_EMAIL);   // mod link tokens are never admin
   if (!isGoogleAdmin && (!tok || !sessions.has(tok) || sessions.get(tok) < Date.now())) return send(res, 401, { error: 'login needed' });
 
   if (route === 'overview') {
@@ -376,6 +376,9 @@ function userApi(req, res, url) {
   }
   const sess = readSession((req.headers.authorization || '').replace(/^Bearer /, ''));
   if (!sess) return send(res, 401, { error: 'sign in again' });
+  if (url.pathname === '/api/me/modtoken' && req.method === 'POST') {   // long-lived code to link the Minecraft mod
+    return send(res, 200, { token: signSession({ sub: sess.sub, email: sess.email, mod: true, exp: Date.now() + 365 * 86400000 }) });
+  }
   if (url.pathname === '/api/me' && req.method === 'GET') {
     return getUser(sess.sub).then(rec => rec ? send(res, 200, profile(rec, sess.email)) : send(res, 401, { error: 'unknown user' }));
   }
@@ -389,6 +392,38 @@ function userApi(req, res, url) {
   }
   send(res, 404, { error: 'not found' });
 }
+
+// Page where a signed-in user gets the code that links the Minecraft mod to their website watchlist
+const MODLINK_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+  '<title>Link Minecraft mod - Price Tracker</title>' +
+  '<script src="https://accounts.google.com/gsi/client" async defer></script></head>' +
+  '<body style="font-family:system-ui,sans-serif;max-width:700px;margin:40px auto;padding:0 16px;line-height:1.5;background:#111;color:#eee">' +
+  '<h1>Link your Minecraft mod</h1>' +
+  '<p>Sign in, then run the command shown below in Minecraft. After that, the price alerts you set on the website also fire in game.</p>' +
+  '<div id="btn"></div><p id="msg" style="color:#aaa"></p>' +
+  '<div id="out" style="display:none"><p>Type this in Minecraft chat (keep it private, it is your login for the mod):</p>' +
+  '<textarea id="cmd" readonly rows="4" style="width:100%;background:#222;color:#fff;border:1px solid #555;padding:8px"></textarea>' +
+  '<p><button id="copy">Copy command</button></p></div>' +
+  '<p><a style="color:#8cf" href="/">Back to Price Tracker</a></p>' +
+  '<script>' +
+  'var msg=document.getElementById("msg");' +
+  'function fail(t){msg.textContent=t;}' +
+  'async function onCred(r){try{' +
+  'var a=await fetch("/api/login/google",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({credential:r.credential})});' +
+  'var aj=await a.json();if(!a.ok)return fail(aj.error||"Sign-in failed");' +
+  'var b=await fetch("/api/me/modtoken",{method:"POST",headers:{Authorization:"Bearer "+aj.token}});' +
+  'var bj=await b.json();if(!b.ok)return fail(bj.error||"Could not create code");' +
+  'document.getElementById("cmd").value="/prices link "+bj.token;' +
+  'document.getElementById("out").style.display="block";msg.textContent="Signed in as "+aj.user.email;' +
+  '}catch(e){fail("Error: "+e.message);}}' +
+  'document.getElementById("copy").onclick=function(){var c=document.getElementById("cmd");c.select();document.execCommand("copy");};' +
+  '(async function(){try{var c=await (await fetch("/api/config")).json();' +
+  'if(!c.enabled)return fail("Sign-in is not enabled on this server.");' +
+  'var t=setInterval(function(){if(window.google&&google.accounts){clearInterval(t);' +
+  'google.accounts.id.initialize({client_id:c.googleClientId,callback:onCred});' +
+  'google.accounts.id.renderButton(document.getElementById("btn"),{theme:"outline",size:"large"});}},200);' +
+  '}catch(e){fail("Error: "+e.message);}})();' +
+  '</script></body></html>';
 
 const server = http.createServer((req, res) => {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -426,6 +461,9 @@ const server = http.createServer((req, res) => {
       '<title>' + (isTerms ? 'Terms of Service' : 'Privacy Policy') + ' - Price Tracker</title></head>' +
       '<body style="font-family:system-ui,sans-serif;max-width:700px;margin:40px auto;padding:0 16px;line-height:1.5">' +
       page + '<p><a href="/">Back to Price Tracker</a></p></body></html>', 'text/html; charset=utf-8');
+  }
+  if (req.method === 'GET' && url.pathname === '/modlink') {
+    return send(res, 200, MODLINK_HTML, 'text/html; charset=utf-8');
   }
   if (req.method === 'GET' && url.pathname === '/health') {
     return send(res, 200, 'Price Tracker server OK - ' + Object.keys(db).length + ' items\n', 'text/plain; charset=utf-8');
